@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -54,27 +55,43 @@ const mockRecentSales = [
   { date: '2024-01-14', product: 'Mini Gadget', quantity: 3, revenue: 150.00, channel: 'Phone' },
 ]
 
-// Generate a deterministic 30-day revenue trend using mock data
-const mockRevenueTrend: { date: string; revenue: number }[] = (() => {
-  const days = 30
-  const today = new Date('2024-01-15')
-  const base = 3000
-  const out: { date: string; revenue: number }[] = []
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(today)
-    d.setDate(today.getDate() - i)
-    // simple pseudo-random seasonal variation
-    const weekday = d.getDay() // 0..6
-    const weekendBoost = weekday === 6 || weekday === 0 ? 1.15 : 1
-    const trend = 1 + (i - days / 2) * -0.005
-    const noise = 1 + ((i * 17) % 7) * 0.01
-    const revenue = Math.round(base * trend * weekendBoost * noise)
-    out.push({ date: d.toISOString().slice(5, 10), revenue })
-  }
-  return out
-})()
-
 export default function AnalyticsPage() {
+  // UI state: date range & filters
+  const [rangeDays, setRangeDays] = useState<7 | 30 | 90>(30)
+  const [showFilters, setShowFilters] = useState(false)
+  const [selectedChannels, setSelectedChannels] = useState<string[]>(['Online', 'POS', 'Phone'])
+
+  const toggleChannel = (ch: string) => {
+    setSelectedChannels((prev) =>
+      prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch]
+    )
+  }
+
+  // Build revenue trend for the chosen range
+  const revenueTrend = useMemo(() => {
+    const days = rangeDays
+    const today = new Date('2024-01-15')
+    const base = 3000
+    const out: { date: string; revenue: number }[] = []
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(today)
+      d.setDate(today.getDate() - i)
+      const weekday = d.getDay()
+      const weekendBoost = weekday === 6 || weekday === 0 ? 1.15 : 1
+      const trend = 1 + (i - days / 2) * -0.005
+      const noise = 1 + ((i * 17) % 7) * 0.01
+      const revenue = Math.round(base * trend * weekendBoost * noise)
+      out.push({ date: d.toISOString().slice(5, 10), revenue })
+    }
+    return out
+  }, [rangeDays])
+
+  // Apply channel filter to recent sales (mock)
+  const filteredRecentSales = useMemo(
+    () => mockRecentSales.filter((s) => selectedChannels.includes(s.channel)),
+    [selectedChannels]
+  )
+
   return (
     <div className="container mx-auto px-4 py-8 space-y-8">
       {/* Header */}
@@ -85,17 +102,51 @@ export default function AnalyticsPage() {
             Analyze sales trends, margins, and performance
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline">
-            <Calendar className="h-4 w-4 mr-2" />
-            Last 30 Days
-          </Button>
-          <Button variant="outline">
+        <div className="flex flex-wrap gap-2 items-center">
+          <div className="inline-flex rounded-md border overflow-hidden">
+            {[7, 30, 90].map((d) => (
+              <Button
+                key={d}
+                size="sm"
+                variant={rangeDays === d ? 'default' : 'ghost'}
+                className="rounded-none"
+                onClick={() => setRangeDays(d as 7 | 30 | 90)}
+              >
+                <Calendar className="h-4 w-4 mr-2" />
+                Last {d} Days
+              </Button>
+            ))}
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setShowFilters((v) => !v)}>
             <Filter className="h-4 w-4 mr-2" />
-            Filter
+            {showFilters ? 'Hide Filters' : 'Filter'}
           </Button>
         </div>
       </div>
+
+      {showFilters && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Filters</CardTitle>
+            <CardDescription>Refine data displayed on this page</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-muted-foreground mr-2">Channels:</span>
+              {['Online', 'POS', 'Phone'].map((ch) => (
+                <Button
+                  key={ch}
+                  size="sm"
+                  variant={selectedChannels.includes(ch) ? 'default' : 'outline'}
+                  onClick={() => toggleChannel(ch)}
+                >
+                  {ch}
+                </Button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -256,7 +307,7 @@ export default function AnalyticsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {mockRecentSales.map((sale, index) => (
+              {filteredRecentSales.map((sale, index) => (
                 <TableRow key={index}>
                   <TableCell>{new Date(sale.date).toLocaleDateString()}</TableCell>
                   <TableCell className="font-medium">{sale.product}</TableCell>
@@ -283,13 +334,13 @@ export default function AnalyticsPage() {
         <CardHeader>
           <CardTitle>Revenue Trend</CardTitle>
           <CardDescription>
-            Daily revenue for the last 30 days
+            Daily revenue for the last {rangeDays} days
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={mockRevenueTrend} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
+              <LineChart data={revenueTrend} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" className="text-muted" />
                 <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                 <YAxis tickFormatter={(v) => `$${v.toLocaleString()}`} width={70} tick={{ fontSize: 12 }} />
