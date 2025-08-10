@@ -1,25 +1,25 @@
 import { useState, useEffect } from 'react'
-import { productsApi, organizationsApi } from '@/lib/api'
+import { productsApi } from '@/lib/api'
 import { Product } from '@/types'
+import { useAuth } from '@/contexts/auth-context'
 
 export function useProducts() {
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const { user, isAuthenticated } = useAuth()
 
   const fetchProducts = async () => {
     try {
       setLoading(true)
       setError(null)
       
-      // Get first organization (demo setup)
-      const orgsResponse = await organizationsApi.list()
-      const orgs = orgsResponse.data
-      if (orgs.length === 0) {
-        throw new Error('No organization found')
+      if (!isAuthenticated || !user) {
+        throw new Error('User not authenticated')
       }
       
-      const productsResponse = await productsApi.getByOrg(orgs[0].id)
+      // Use the user's org_id from auth context
+      const productsResponse = await productsApi.getByOrg(user.org_id)
       setProducts(productsResponse.data)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch products')
@@ -29,8 +29,10 @@ export function useProducts() {
   }
 
   useEffect(() => {
-    fetchProducts()
-  }, [])
+    if (isAuthenticated && user) {
+      fetchProducts()
+    }
+  }, [isAuthenticated, user])
 
   const refetch = () => {
     fetchProducts()

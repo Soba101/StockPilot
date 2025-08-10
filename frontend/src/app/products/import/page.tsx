@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ArrowLeft, Upload, Download, CheckCircle } from 'lucide-react'
 import { productsApi } from '@/lib/api'
-import { useOrganizations } from '@/hooks/use-organizations'
+import { useAuth } from '@/contexts/auth-context'
 
 interface ImportPreview {
   sku: string
@@ -23,7 +23,7 @@ interface ImportPreview {
 
 export default function ImportProductsPage() {
   const router = useRouter()
-  const { currentOrg } = useOrganizations()
+  const { user, isAuthenticated } = useAuth()
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<ImportPreview[]>([])
   const [loading, setLoading] = useState(false)
@@ -70,8 +70,8 @@ export default function ImportProductsPage() {
     setError(null)
 
     try {
-      if (!currentOrg) {
-        throw new Error('No organization found')
+      if (!isAuthenticated || !user) {
+        throw new Error('User not authenticated')
       }
 
       const text = await file.text()

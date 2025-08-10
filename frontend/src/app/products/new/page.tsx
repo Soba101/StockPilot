@@ -6,11 +6,11 @@ import Link from 'next/link'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { ArrowLeft, Save } from 'lucide-react'
+import { Textarea } from '@/components/ui/textarea'
+import { ArrowLeft } from 'lucide-react'
 import { productsApi } from '@/lib/api'
-import { useOrganizations } from '@/hooks/use-organizations'
+import { useAuth } from '@/contexts/auth-context'
 
 interface ProductForm {
   sku: string
@@ -25,7 +25,7 @@ interface ProductForm {
 
 export default function NewProductPage() {
   const router = useRouter()
-  const { currentOrg } = useOrganizations()
+  const { user, isAuthenticated } = useAuth()
   const [form, setForm] = useState<ProductForm>({
     sku: '',
     name: '',
@@ -45,12 +45,12 @@ export default function NewProductPage() {
     setError(null)
 
     try {
-      if (!currentOrg) {
-        throw new Error('No organization found')
+      if (!isAuthenticated || !user) {
+        throw new Error('User not authenticated')
       }
 
       const productData = {
-        org_id: currentOrg.id,
+        org_id: user.org_id,
         sku: form.sku,
         name: form.name,
         description: form.description || null,
@@ -202,7 +202,7 @@ export default function NewProductPage() {
                   <Link href="/products">Cancel</Link>
                 </Button>
                 <Button type="submit" disabled={loading}>
-                  <Save className="h-4 w-4 mr-2" />
+                  {/* <Save className="h-4 w-4 mr-2" /> */}
                   {loading ? 'Creating...' : 'Create Product'}
                 </Button>
               </div>
