@@ -1,0 +1,88 @@
+version: 2
+
+sources:
+  - name: stockpilot
+    description: Raw StockPilot application data
+    tables:
+      - name: products
+        description: Product catalog
+        columns:
+          - name: id
+            description: Primary key
+            tests:
+              - unique
+              - not_null
+          - name: sku
+            description: Stock keeping unit
+            tests:
+              - not_null
+          - name: name
+            description: Product name
+            tests:
+              - not_null
+
+      - name: inventory_movements
+        description: All inventory transactions
+        columns:
+          - name: id
+            description: Primary key
+            tests:
+              - unique
+              - not_null
+          - name: product_id
+            description: Reference to products table
+            tests:
+              - not_null
+          - name: quantity
+            description: Movement quantity (positive for in, negative for out)
+            tests:
+              - not_null
+
+      - name: locations
+        description: Storage and fulfillment locations
+        columns:
+          - name: id
+            description: Primary key
+            tests:
+              - unique
+              - not_null
+          - name: name
+            description: Location name
+            tests:
+              - not_null
+
+models:
+  - name: stg_products
+    description: Staged product data with clean column names
+    columns:
+      - name: product_id
+        description: Primary key
+        tests:
+          - unique
+          - not_null
+      - name: sku
+        description: Stock keeping unit
+        tests:
+          - not_null
+
+  - name: stg_inventory_movements
+    description: Staged inventory movements with clean column names
+    columns:
+      - name: movement_id
+        description: Primary key
+        tests:
+          - unique
+          - not_null
+      - name: product_id
+        description: Foreign key to products
+        tests:
+          - not_null
+
+  - name: stg_locations
+    description: Staged location data with clean column names
+    columns:
+      - name: location_id
+        description: Primary key
+        tests:
+          - unique
+          - not_null

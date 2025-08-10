@@ -1,0 +1,47 @@
+name: 'stockpilot'
+version: '1.0.0'
+config-version: 2
+
+# This setting configures which "profile" dbt uses for this project.
+profile: 'stockpilot'
+
+# These configurations specify where dbt should look for different types of files.
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# Model configurations
+models:
+  stockpilot:
+    # Apply to all models in this project
+    +materialized: view
+    # Staging models
+    staging:
+      +materialized: view
+      +schema: staging
+    # Core business logic models
+    core:
+      +materialized: table
+      +schema: core
+    # Data marts for analytics
+    marts:
+      +materialized: table
+      +schema: marts
+
+# Seeds configurations
+seeds:
+  stockpilot:
+    +schema: seeds
+
+# Snapshots configurations
+snapshots:
+  stockpilot:
+    +target_schema: snapshots
