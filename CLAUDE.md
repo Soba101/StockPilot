@@ -35,8 +35,33 @@ cd frontend
 npm install
 npm run dev
 
-# Database connection test
-python final_test.py
+# Database connection tests
+python backend/host_test.py      # Test from host to Docker PostgreSQL
+python backend/container_test.py # Test from container context
+```
+
+### Frontend Commands
+```bash
+cd frontend
+npm run dev        # Start development server
+npm run build      # Build for production
+npm run start      # Start production server
+npm run lint       # Run ESLint
+```
+
+### Backend Testing & Database
+```bash
+cd backend
+pytest                           # Run all tests
+python -m pytest -v             # Run with verbose output
+python backend/host_test.py      # Test DB connection from host
+python backend/container_test.py # Test DB connection in container context
+
+# dbt operations (requires connection to analytics schema)
+cd backend/dbt
+dbt run              # Run all models
+dbt test             # Run tests
+dbt run --models marts  # Run only marts models
 ```
 
 ### Common Operations
@@ -49,6 +74,9 @@ open http://localhost:8000/docs
 
 # Frontend
 open http://localhost:3000
+
+# Check database connectivity
+lsof -i :5432  # Check if local PostgreSQL conflicts with Docker port
 ```
 
 ## Database Architecture
@@ -70,8 +98,10 @@ Order (1) → (many) OrderItems
 ```
 
 ### dbt Models Structure
-- **Staging:** `stg_products`, `stg_inventory_movements`, `stg_locations` (views)
-- **Marts:** `inventory_snapshot_daily`, `stockout_risk`, `velocity_analysis` (tables)
+- **Staging:** `stg_products`, `stg_inventory_movements`, `stg_locations` (views in staging schema)
+- **Marts:** `inventory_snapshot_daily`, `stockout_risk`, `velocity_analysis` (tables in marts schema)
+- **Schemas:** staging (views), core (tables), marts (analytics tables), seeds (reference data)
+- **Target Schema:** analytics (configured in profiles.yml)
 
 ## Backend Patterns
 
@@ -109,20 +139,29 @@ Order (1) → (many) OrderItems
 - **TypeScript types** in `/types/` matching backend schemas
 
 ### Key Files
-- `lib/api.ts` - Centralized API client
-- `hooks/use-*.ts` - Custom React Query hooks
-- `components/layout/` - Navigation and layout
-- `types/index.ts` - TypeScript definitions
+- `lib/api.ts` - Centralized Axios client with auth interceptors and endpoint definitions
+- `hooks/use-*.ts` - Custom React Query hooks (use-products.ts, use-organizations.ts)
+- `components/layout/navbar.tsx` - Main navigation component
+- `types/index.ts` - TypeScript definitions matching backend schemas
+- `contexts/auth-context.tsx` - Authentication state management
 
 ## Database Connection
 
-**Connection String:** `postgresql://postgres:stockpilot_dev@127.0.0.1:5432/stockpilot`
+**Connection Strings:**
+- **Main App:** `postgresql://postgres:stockpilot_dev@127.0.0.1:5432/stockpilot`
+- **dbt Analytics:** `postgresql://stockpilot:stockpilot_dev@127.0.0.1:5432/stockpilot` (schema: analytics)
+
+### Database Users & Permissions
+- **postgres** - Superuser for Docker container setup
+- **stockpilot** - Application user with SUPERUSER, CREATEDB, CREATEROLE privileges
+- Both users share password: `stockpilot_dev`
 
 ### Troubleshooting DB Issues
 - Local PostgreSQL may conflict with Docker on port 5432
 - Kill local instances: `lsof -i :5432` then `kill <PID>`  
 - Fresh reset: `docker-compose down -v && docker-compose up -d`
-- Test connection: `python backend/final_test.py`
+- Test connections: `python backend/host_test.py` and `python backend/container_test.py`
+- Database initialized with `backend/init.sql` (creates schema + sample data)
 
 ## Important Configuration
 
@@ -131,7 +170,15 @@ Order (1) → (many) OrderItems
 DATABASE_URL=postgresql://postgres:stockpilot_dev@127.0.0.1:5432/stockpilot
 REDIS_URL=redis://localhost:6379/0
 ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+SECRET_KEY=development-secret-key
+OPENAI_API_KEY=your-openai-key-here
 ```
+
+### Key Configuration Files
+- **backend/app/core/config.py** - Pydantic settings with environment variables
+- **frontend/src/lib/api.ts** - Axios configuration with auth interceptors
+- **docker-compose.yml** - PostgreSQL 15 + Redis 7 setup
+- **backend/dbt/profiles.yml** - dbt connection configuration for analytics
 
 ### Docker (docker-compose.yml)
 - PostgreSQL 15 with init.sql for schema + sample data
