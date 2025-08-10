@@ -29,6 +29,8 @@ CREATE TABLE locations (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+-- Ensure unique location names per org
+CREATE UNIQUE INDEX IF NOT EXISTS ux_locations_org_name ON locations(org_id, name);
 
 -- Products table
 CREATE TABLE products (
@@ -56,6 +58,17 @@ CREATE TABLE suppliers (
     contact_phone VARCHAR(50),
     lead_time_days INTEGER DEFAULT 7,
     minimum_order_quantity INTEGER DEFAULT 1,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Users table for auth
+CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(32) NOT NULL CHECK (role IN ('admin','viewer','purchaser')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -130,4 +143,9 @@ BEGIN
     (demo_org_id, 'WIDGET-001', 'Blue Widget', 'Widgets', 5.00, 15.00, 10),
     (demo_org_id, 'WIDGET-002', 'Red Widget', 'Widgets', 5.50, 16.00, 8),
     (demo_org_id, 'GADGET-001', 'Super Gadget', 'Gadgets', 25.00, 75.00, 5);
+    
+    -- Insert demo admin user with properly hashed password
+    -- Password: admin123 (hashed with bcrypt)
+    INSERT INTO users (org_id, email, password_hash, role) VALUES
+    (demo_org_id, 'admin@demo.co', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj/RK.s5u.Ge', 'admin');
 END $$;

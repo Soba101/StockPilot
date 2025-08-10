@@ -77,40 +77,26 @@ export default function ImportProductsPage() {
       const text = await file.text()
       const lines = text.split('\n')
       
-      let successCount = 0
-      let errorCount = 0
-
-      // Process each row (skip header)
+      const toUpsert = [] as any[]
       for (let i = 1; i < lines.length; i++) {
         const values = lines[i].split(',').map(v => v.trim())
         if (values.length >= 2 && values[0] && values[1]) {
-          try {
-            const productData = {
-              org_id: currentOrg.id,
-              sku: values[0],
-              name: values[1],
-              category: values[2] || null,
-              cost: values[3] ? parseFloat(values[3]) : null,
-              price: values[4] ? parseFloat(values[4]) : null,
-              uom: values[6] || 'each',
-              reorder_point: values[5] ? parseInt(values[5]) : 10
-            }
-
-            await productsApi.create(productData)
-            successCount++
-          } catch {
-            errorCount++
-          }
+          toUpsert.push({
+            sku: values[0],
+            name: values[1],
+            category: values[2] || null,
+            cost: values[3] ? parseFloat(values[3]) : null,
+            price: values[4] ? parseFloat(values[4]) : null,
+            uom: values[6] || 'each',
+            reorder_point: values[5] ? parseInt(values[5]) : 10
+          })
         }
       }
 
-      if (successCount > 0) {
-        setImported(true)
-      }
-      
-      if (errorCount > 0) {
-        setError(`${successCount} products imported successfully, ${errorCount} failed.`)
-      }
+      if (toUpsert.length === 0) throw new Error('No valid rows found in CSV')
+
+      await productsApi.bulkUpsert(toUpsert)
+      setImported(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed')
     } finally {

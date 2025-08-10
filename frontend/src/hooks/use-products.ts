@@ -13,13 +13,14 @@ export function useProducts() {
       setError(null)
       
       // Get first organization (demo setup)
-      const orgs = await organizationsApi.getAll()
+      const orgsResponse = await organizationsApi.list()
+      const orgs = orgsResponse.data
       if (orgs.length === 0) {
         throw new Error('No organization found')
       }
       
-      const products = await productsApi.getByOrganization(orgs[0].id)
-      setProducts(products)
+      const productsResponse = await productsApi.getByOrg(orgs[0].id)
+      setProducts(productsResponse.data)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch products')
     } finally {
@@ -48,8 +49,8 @@ export function useProduct(id: string) {
       try {
         setLoading(true)
         setError(null)
-        const product = await productsApi.getById(id)
-        setProduct(product)
+        const response = await productsApi.get(id)
+        setProduct(response.data)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch product')
       } finally {

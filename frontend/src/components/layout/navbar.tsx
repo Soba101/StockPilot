@@ -1,72 +1,69 @@
-'use client'
+'use client';
 
-import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
-import { 
-  BarChart3, 
-  Package, 
-  TrendingUp, 
-  ShoppingCart, 
-  MessageCircle, 
-  Settings,
-  Home
-} from 'lucide-react'
-
-const navigation = [
-  { name: 'Dashboard', href: '/dashboard', icon: BarChart3 },
-  { name: 'Products', href: '/products', icon: Package },
-  { name: 'Analytics', href: '/analytics', icon: TrendingUp },
-  { name: 'Purchasing', href: '/purchasing', icon: ShoppingCart },
-  { name: 'Chat', href: '/chat', icon: MessageCircle },
-  { name: 'Settings', href: '/settings', icon: Settings },
-]
+import Link from 'next/link';
+import { useAuth } from '@/contexts/auth-context';
+import { Button } from '@/components/ui/button';
 
 export function Navbar() {
-  const pathname = usePathname()
+  const { user, isAuthenticated, logout } = useAuth();
+
+  const handleLogout = () => {
+    logout();
+    // Redirect to login page
+    window.location.href = '/login';
+  };
 
   return (
-    <nav className="bg-background border-b">
+    <nav className="bg-white shadow-sm border-b">
       <div className="container mx-auto px-4">
-        <div className="flex items-center justify-between h-16">
+        <div className="flex justify-between items-center h-16">
           <div className="flex items-center space-x-8">
-            <Link href="/" className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-primary rounded-md flex items-center justify-center">
-                <Home className="w-4 h-4 text-primary-foreground" />
-              </div>
-              <span className="text-xl font-bold">StockPilot</span>
+            <Link href="/" className="text-xl font-bold text-gray-900">
+              StockPilot
             </Link>
             
-            <div className="hidden md:flex space-x-1">
-              {navigation.map((item) => {
-                const Icon = item.icon
-                const isActive = pathname.startsWith(item.href)
-                
-                return (
-                  <Button
-                    key={item.name}
-                    variant={isActive ? 'default' : 'ghost'}
-                    size="sm"
-                    asChild
-                  >
-                    <Link href={item.href} className="flex items-center space-x-2">
-                      <Icon className="w-4 h-4" />
-                      <span>{item.name}</span>
-                    </Link>
-                  </Button>
-                )
-              })}
-            </div>
+            {isAuthenticated && (
+              <div className="hidden md:flex space-x-6">
+                <Link href="/dashboard" className="text-gray-600 hover:text-gray-900">
+                  Dashboard
+                </Link>
+                <Link href="/products" className="text-gray-600 hover:text-gray-900">
+                  Products
+                </Link>
+                <Link href="/analytics" className="text-gray-600 hover:text-gray-900">
+                  Analytics
+                </Link>
+                <Link href="/purchasing" className="text-gray-600 hover:text-gray-900">
+                  Purchasing
+                </Link>
+                <Link href="/chat" className="text-gray-600 hover:text-gray-900">
+                  Chat
+                </Link>
+                <Link href="/settings" className="text-gray-600 hover:text-gray-900">
+                  Settings
+                </Link>
+              </div>
+            )}
           </div>
-          
+
           <div className="flex items-center space-x-4">
-            <div className="text-sm text-muted-foreground">
-              Demo Company
-            </div>
+            {isAuthenticated ? (
+              <div className="flex items-center space-x-4">
+                <span className="text-sm text-gray-600">
+                  {user?.email} ({user?.role})
+                </span>
+                <Button onClick={handleLogout} variant="outline" size="sm">
+                  Logout
+                </Button>
+              </div>
+            ) : (
+              <Link href="/login">
+                <Button size="sm">Login</Button>
+              </Link>
+            )}
           </div>
         </div>
       </div>
     </nav>
-  )
+  );
 }

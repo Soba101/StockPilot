@@ -12,8 +12,8 @@ export function useOrganizations() {
       try {
         setLoading(true)
         setError(null)
-        const orgs = await organizationsApi.getAll()
-        setOrganizations(orgs)
+        const response = await organizationsApi.list()
+        setOrganizations(response.data)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch organizations')
       } finally {
