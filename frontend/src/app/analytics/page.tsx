@@ -24,36 +24,7 @@ import {
   CartesianGrid,
   Area,
 } from 'recharts'
-
-// Mock data - replace with real API calls later
-const mockSalesData = {
-  totalRevenue: 128450,
-  totalUnits: 2345,
-  avgOrderValue: 54.76,
-  totalOrders: 2346,
-  revenueGrowth: 12.5,
-  unitsGrowth: -2.3
-}
-
-const mockTopProducts = [
-  { name: 'Blue Widget', sku: 'WIDGET-001', units: 245, revenue: 3675, margin: 35.2 },
-  { name: 'Super Gadget', sku: 'GADGET-001', units: 156, revenue: 11700, margin: 42.8 },
-  { name: 'Red Widget', sku: 'WIDGET-002', units: 189, revenue: 3024, margin: 33.1 },
-  { name: 'Mini Gadget', sku: 'GADGET-002', units: 134, revenue: 6700, margin: 38.5 },
-]
-
-const mockCategoryData = [
-  { category: 'Widgets', revenue: 15680, percentage: 45.2, growth: 8.3 },
-  { category: 'Gadgets', revenue: 12450, percentage: 35.8, growth: 15.7 },
-  { category: 'Accessories', revenue: 6620, percentage: 19.0, growth: -5.2 },
-]
-
-const mockRecentSales = [
-  { date: '2024-01-15', product: 'Blue Widget', quantity: 5, revenue: 75.00, channel: 'Online' },
-  { date: '2024-01-15', product: 'Super Gadget', quantity: 2, revenue: 150.00, channel: 'POS' },
-  { date: '2024-01-14', product: 'Red Widget', quantity: 8, revenue: 128.00, channel: 'Online' },
-  { date: '2024-01-14', product: 'Mini Gadget', quantity: 3, revenue: 150.00, channel: 'Phone' },
-]
+import { useAnalytics } from '@/hooks/use-analytics'
 
 export default function AnalyticsPage() {
   // UI state: date range & filters
@@ -61,36 +32,44 @@ export default function AnalyticsPage() {
   const [showFilters, setShowFilters] = useState(false)
   const [selectedChannels, setSelectedChannels] = useState<string[]>(['Online', 'POS', 'Phone'])
 
+  // Fetch real analytics data
+  const { data: analytics, loading, error, refetch } = useAnalytics(rangeDays)
+
   const toggleChannel = (ch: string) => {
     setSelectedChannels((prev) =>
       prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch]
     )
   }
 
-  // Build revenue trend for the chosen range
-  const revenueTrend = useMemo(() => {
-    const days = rangeDays
-    const today = new Date('2024-01-15')
-    const base = 3000
-    const out: { date: string; revenue: number }[] = []
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(today)
-      d.setDate(today.getDate() - i)
-      const weekday = d.getDay()
-      const weekendBoost = weekday === 6 || weekday === 0 ? 1.15 : 1
-      const trend = 1 + (i - days / 2) * -0.005
-      const noise = 1 + ((i * 17) % 7) * 0.01
-      const revenue = Math.round(base * trend * weekendBoost * noise)
-      out.push({ date: d.toISOString().slice(5, 10), revenue })
-    }
-    return out
-  }, [rangeDays])
+  // Apply channel filter to recent sales
+  const filteredRecentSales = useMemo(() => {
+    if (!analytics?.recentSales) return []
+    return analytics.recentSales.filter((s) => selectedChannels.includes(s.channel))
+  }, [analytics?.recentSales, selectedChannels])
 
-  // Apply channel filter to recent sales (mock)
-  const filteredRecentSales = useMemo(
-    () => mockRecentSales.filter((s) => selectedChannels.includes(s.channel)),
-    [selectedChannels]
-  )
+  if (loading) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="text-center">Loading analytics...</div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="text-destructive">Error loading analytics: {error}</div>
+      </div>
+    )
+  }
+
+  if (!analytics) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="text-center">No analytics data available</div>
+      </div>
+    )
+  }
 
   return (
     <div className="container mx-auto px-4 py-8 space-y-8">
@@ -156,10 +135,10 @@ export default function AnalyticsPage() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${mockSalesData.totalRevenue.toLocaleString()}</div>
+            <div className="text-2xl font-bold">${analytics.salesMetrics.totalRevenue.toLocaleString()}</div>
             <p className="text-xs text-green-600 flex items-center">
               <TrendingUp className="h-3 w-3 mr-1" />
-              +{mockSalesData.revenueGrowth}% from last month
+              +{analytics.salesMetrics.revenueGrowth}% from last month
             </p>
           </CardContent>
         </Card>
@@ -170,10 +149,10 @@ export default function AnalyticsPage() {
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{mockSalesData.totalUnits.toLocaleString()}</div>
+            <div className="text-2xl font-bold">{analytics.salesMetrics.totalUnits.toLocaleString()}</div>
             <p className="text-xs text-red-600 flex items-center">
               <TrendingDown className="h-3 w-3 mr-1" />
-              {mockSalesData.unitsGrowth}% from last month
+              {analytics.salesMetrics.unitsGrowth}% from last month
             </p>
           </CardContent>
         </Card>
@@ -184,9 +163,9 @@ export default function AnalyticsPage() {
             <BarChart3 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${mockSalesData.avgOrderValue}</div>
+            <div className="text-2xl font-bold">${analytics.salesMetrics.avgOrderValue.toFixed(2)}</div>
             <p className="text-xs text-muted-foreground">
-              Across {mockSalesData.totalOrders} orders
+              Across {analytics.salesMetrics.totalOrders} orders
             </p>
           </CardContent>
         </Card>
@@ -197,7 +176,7 @@ export default function AnalyticsPage() {
             <PieChart className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{mockSalesData.totalOrders.toLocaleString()}</div>
+            <div className="text-2xl font-bold">{analytics.salesMetrics.totalOrders.toLocaleString()}</div>
             <p className="text-xs text-muted-foreground">
               This period
             </p>
@@ -225,7 +204,7 @@ export default function AnalyticsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {mockTopProducts.map((product, index) => (
+                {analytics.topProducts.map((product, index) => (
                   <TableRow key={index}>
                     <TableCell>
                       <div>
@@ -255,7 +234,7 @@ export default function AnalyticsPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {mockCategoryData.map((category, index) => (
+              {analytics.categoryData.map((category, index) => (
                 <div key={index} className="space-y-2">
                   <div className="flex justify-between items-center">
                     <span className="font-medium">{category.category}</span>
@@ -309,7 +288,7 @@ export default function AnalyticsPage() {
             <TableBody>
               {filteredRecentSales.map((sale, index) => (
                 <TableRow key={index}>
-                  <TableCell>{new Date(sale.date).toLocaleDateString()}</TableCell>
+                  <TableCell>{sale.date}</TableCell>
                   <TableCell className="font-medium">{sale.product}</TableCell>
                   <TableCell className="text-right">{sale.quantity}</TableCell>
                   <TableCell className="text-right">${sale.revenue.toFixed(2)}</TableCell>
@@ -340,7 +319,7 @@ export default function AnalyticsPage() {
         <CardContent>
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={revenueTrend} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
+              <LineChart data={analytics.revenueTrend} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" className="text-muted" />
                 <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                 <YAxis tickFormatter={(v) => `$${v.toLocaleString()}`} width={70} tick={{ fontSize: 12 }} />

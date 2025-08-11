@@ -228,7 +228,7 @@ def get_inventory_summary(
         if is_out_of_stock:
             location_summaries[stock.location_id]['out_of_stock_count'] += 1
         
-        stock_value = stock.on_hand_quantity * (product.cost or 0)
+        stock_value = stock.on_hand_quantity * float(product.cost or 0)
         location_summaries[stock.location_id]['total_stock_value'] += stock_value
     
     # Build location summaries
@@ -368,8 +368,11 @@ def transfer_stock(
     available_stock = db.query(
         func.sum(
             case(
-                (InventoryMovement.movement_type.in_(['in', 'adjust']), InventoryMovement.quantity),
-                else_=-InventoryMovement.quantity
+                (InventoryMovement.movement_type == 'in', InventoryMovement.quantity),
+                (InventoryMovement.movement_type == 'adjust', InventoryMovement.quantity),
+                (InventoryMovement.movement_type == 'out', -InventoryMovement.quantity),
+                (InventoryMovement.movement_type == 'transfer', -InventoryMovement.quantity),
+                else_=0
             )
         )
     ).filter(

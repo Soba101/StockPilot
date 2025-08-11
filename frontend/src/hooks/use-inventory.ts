@@ -69,10 +69,17 @@ export interface StockTransfer {
 }
 
 export function useInventory(locationId?: string) {
-  return useQuery<InventorySummary, Error>({
+  const query = useQuery<InventorySummary, Error>({
     queryKey: ['inventory-summary', locationId],
     queryFn: () => inventoryApi.getSummary(locationId),
   });
+
+  return {
+    summary: query.data,
+    loading: query.isLoading,
+    error: query.error,
+    refetch: query.refetch,
+  };
 }
 
 export function useInventoryMovements(filters?: {
