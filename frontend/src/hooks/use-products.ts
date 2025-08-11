@@ -1,69 +1,82 @@
-import { useState, useEffect } from 'react'
-import { productsApi } from '@/lib/api'
-import { Product } from '@/types'
-import { useAuth } from '@/contexts/auth-context'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { productsApi } from '@/lib/api';
+
+export interface Product {
+  id: string;
+  org_id: string;
+  sku: string;
+  name: string;
+  category?: string;
+  cost?: number;
+  price?: number;
+  reorder_point?: number;
+  created_at: string;
+  updated_at: string;
+}
 
 export function useProducts() {
-  const [products, setProducts] = useState<Product[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const { user, isAuthenticated } = useAuth()
+  const query = useQuery<Product[], Error>({
+    queryKey: ['products'],
+    queryFn: () => productsApi.list().then(res => res.data),
+  });
 
-  const fetchProducts = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      
-      if (!isAuthenticated || !user) {
-        throw new Error('User not authenticated')
-      }
-      
-      // Use the user's org_id from auth context
-      const productsResponse = await productsApi.getByOrg(user.org_id)
-      setProducts(productsResponse.data)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch products')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    if (isAuthenticated && user) {
-      fetchProducts()
-    }
-  }, [isAuthenticated, user])
-
-  const refetch = () => {
-    fetchProducts()
-  }
-
-  return { products, loading, error, refetch }
+  return {
+    products: query.data || [],
+    loading: query.isLoading,
+    error: query.error?.message,
+    refetch: query.refetch,
+  };
 }
 
 export function useProduct(id: string) {
-  const [product, setProduct] = useState<Product | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  return useQuery<Product, Error>({
+    queryKey: ['products', id],
+    queryFn: () => productsApi.get(id).then(res => res.data),
+    enabled: !!id,
+  });
+}
 
-  useEffect(() => {
-    const fetchProduct = async () => {
-      try {
-        setLoading(true)
-        setError(null)
-        const response = await productsApi.get(id)
-        setProduct(response.data)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch product')
-      } finally {
-        setLoading(false)
-      }
-    }
+export function useCreateProduct() {
+  const queryClient = useQueryClient();
+  
+  return useMutation<Product, Error, Partial<Product>>({
+    mutationFn: (data) => productsApi.create(data).then(res => res.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+    },
+  });
+}
 
-    if (id) {
-      fetchProduct()
-    }
-  }, [id])
+export function useUpdateProduct() {
+  const queryClient = useQueryClient();
+  
+  return useMutation<Product, Error, { id: string; data: Partial<Product> }>({
+    mutationFn: ({ id, data }) => productsApi.update(id, data).then(res => res.data),
+    onSuccess: (_, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['products', id] });
+    },
+  });
+}
 
-  return { product, loading, error }
+export function useDeleteProduct() {
+  const queryClient = useQueryClient();
+  
+  return useMutation<void, Error, string>({
+    mutationFn: (id) => productsApi.delete(id).then(res => res.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+    },
+  });
+}
+
+export function useBulkUpsertProducts() {
+  const queryClient = useQueryClient();
+  
+  return useMutation<Product[], Error, Product[]>({
+    mutationFn: (products) => productsApi.bulkUpsert(products).then(res => res.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+    },
+  });
 }
