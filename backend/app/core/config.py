@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 
+    # Chat / LLM settings
+    CHAT_ENABLED: bool = bool(int(os.getenv("CHAT_ENABLED", "1")))
+    CHAT_LLM_FALLBACK_ENABLED: bool = bool(int(os.getenv("CHAT_LLM_FALLBACK_ENABLED", "0")))
+    LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "http://127.0.0.1:1234")
+    LLM_MODEL_ID: str = os.getenv("LLM_MODEL_ID", "openai/gpt-oss-20b")
+    LLM_TIMEOUT_SECONDS: int = int(os.getenv("LLM_TIMEOUT_SECONDS", "3"))
+
     # Alerting / notifications
     ALERT_CRON_TOKEN: str = os.getenv("ALERT_CRON_TOKEN", "dev-cron-token")
     ALERT_EMAIL_FROM: str = os.getenv("ALERT_EMAIL_FROM", "alerts@stockpilot.local")

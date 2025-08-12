@@ -1,22 +1,21 @@
 from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, func
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-import uuid
 from app.core.database import Base
+from .base import BaseModel
 
-class InventoryMovement(Base):
+class InventoryMovement(Base, BaseModel):
     __tablename__ = "inventory_movements"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
-    location_id = Column(UUID(as_uuid=True), ForeignKey("locations.id"), nullable=False)
+    # id inherited from BaseModel
+    product_id = Column(BaseModel.UUIDType, ForeignKey("products.id"), nullable=False)
+    location_id = Column(BaseModel.UUIDType, ForeignKey("locations.id"), nullable=False)
     quantity = Column(Integer, nullable=False)
     movement_type = Column(String(20), nullable=False)  # 'in', 'out', 'adjust', 'transfer'
     reference = Column(String(255))
     notes = Column(Text)
     timestamp = Column(DateTime(timezone=True), nullable=False)
-    created_by = Column(UUID(as_uuid=True))  # Will reference users when auth is implemented
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(BaseModel.UUIDType)  # Will reference users when auth is implemented
+    # created_at / updated_at inherited from BaseModel; avoid redefining to keep schema consistent
     
     # Relationships
     product = relationship("Product", back_populates="inventory_movements")

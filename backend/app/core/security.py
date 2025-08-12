@@ -1,6 +1,6 @@
 import os
 import datetime as dt
-from typing import Optional
+from typing import Optional, Any
 from jose import jwt
 from passlib.context import CryptContext
 
@@ -17,7 +17,21 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, password_hash: str) -> bool:
     return pwd_context.verify(password, password_hash)
 
-def create_access_token(sub: str, org_id: str, role: str) -> str:
+def create_access_token(sub: Optional[str] = None, org_id: Optional[str] = None, role: str = "user", **kwargs: Any) -> str:
+    """Create an access JWT.
+
+    Backwards compatibility: some tests call with user_id= instead of sub=.
+    We accept either and normalize to JWT 'sub'. If org_id missing, raise ValueError.
+    """
+    # Accept alias user_id
+    if sub is None:
+        sub = kwargs.get("user_id")
+    if sub is None:
+        raise ValueError("sub (or user_id) is required")
+    if org_id is None:
+        org_id = kwargs.get("org_id")
+    if org_id is None:
+        raise ValueError("org_id is required")
     now = dt.datetime.utcnow()
     payload = {
         "sub": sub,

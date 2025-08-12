@@ -103,3 +103,12 @@ def read_product_by_sku(org_id: str, sku: str, db: Session = Depends(get_db)):
     if product is None:
         raise HTTPException(status_code=404, detail="Product not found")
     return product
+
+@router.delete("/{product_id}")
+def delete_product(product_id: str, db: Session = Depends(get_db)):
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    db.delete(product)
+    db.commit()
+    return {"status": "deleted", "id": product_id}

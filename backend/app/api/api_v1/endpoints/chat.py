@@ -1,0 +1,162 @@
+from __future__ import annotations
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+from datetime import datetime
+from app.core.database import get_db, get_current_claims
+from app.core.config import settings
+from app.schemas.chat import ChatQueryRequest, ChatQueryResponse, ConfidenceMeta, FreshnessMeta, QueryExplainer
+from app.schemas.chat import IntentName, IntentResolution
+from app.services.intent_resolver import resolve_intent
+from app.services.intent_rules import INTENT_HANDLERS, INTENT_PARAM_MODELS
+from app.services.llm_client import llm_intent_resolver
+from app.services.business_context import get_business_context
+
+router = APIRouter()
+
+async def _compute_freshness(db: Session, org_id: str):
+    inv_ts = db.execute(text("SELECT max(ts) as m FROM inventory_movements WHERE org_id=:org"), {"org": org_id}).fetchone()
+    order_ts = db.execute(text("SELECT max(ordered_at) as m FROM orders WHERE org_id=:org"), {"org": org_id}).fetchone()
+    candidates = [r.m for r in [inv_ts, order_ts] if r and r.m]
+    if candidates:
+        latest = max(candidates)
+        lag = (datetime.utcnow() - latest).total_seconds()
+        return latest.isoformat(), int(lag)
+    return None, None
+
+@router.post("/query", response_model=ChatQueryResponse)
+async def chat_query(req: ChatQueryRequest, db: Session = Depends(get_db), claims = Depends(get_current_claims)):
+    if not settings.CHAT_ENABLED:
+        raise HTTPException(status_code=403, detail="Chat disabled")
+    org_id = claims.get("org")
+
+    # Resolve intent
+    resolution: IntentResolution
+    if req.intent:
+        resolution = IntentResolution(intent=req.intent, params=req.params, confidence=1.0, source='rules', reasons=['explicit'])
+    else:
+        resolution = await resolve_intent(req.prompt)
+    
+    # If no specific intent is resolved and LLM is enabled, use general chat
+    if not resolution.intent and settings.CHAT_LLM_FALLBACK_ENABLED:
+        try:
+            # Get comprehensive business context
+            business_context = get_business_context(db, org_id)
+            answer = await llm_intent_resolver.general_chat(req.prompt, business_context)
+            now_iso = datetime.utcnow().isoformat()
+            
+            return ChatQueryResponse(
+                intent=None,
+                title="StockPilot Assistant",
+                answer_summary=answer,
+                data={"columns": [], "rows": []},
+                query_explainer=QueryExplainer(definition="Business-aware conversation", sql=None, sources=[]),
+                freshness=FreshnessMeta(generated_at=now_iso, data_fresh_at=None, max_lag_seconds=None),
+                confidence=ConfidenceMeta(level='high', reasons=['business_context_aware']),
+                source='llm',
+                warnings=[]
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}")
+    
+    if not resolution.intent:
+        raise HTTPException(status_code=400, detail={"error":"intent_unresolved","reasons":resolution.reasons})
+
+    # Validate params
+    param_model = INTENT_PARAM_MODELS[resolution.intent]
+    try:
+        validated_params = param_model(**{**resolution.params, **req.params}).model_dump(by_alias=True)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail={"error":"param_validation_failed","message":str(e)})
+
+    # Execute handler
+    handler = INTENT_HANDLERS[resolution.intent]
+    data_payload = handler(validated_params, db, org_id)
+
+    latest_ts, lag = await _compute_freshness(db, org_id)
+    now_iso = datetime.utcnow().isoformat()
+
+    # Confidence heuristic mapping
+    level = 'high' if resolution.confidence >= 0.75 else 'medium' if resolution.confidence >= 0.55 else 'low'
+
+    explainer = QueryExplainer(definition=data_payload.get('definition',''), sql=data_payload.get('sql'), sources=[])
+    freshness = FreshnessMeta(generated_at=now_iso, data_fresh_at=latest_ts, max_lag_seconds=lag)
+    confidence = ConfidenceMeta(level=level, reasons=resolution.reasons)
+
+    title_map = {
+        'top_skus_by_margin': 'Top SKUs by Margin',
+        'stockout_risk': 'Stockout Risk Analysis',
+        'week_in_review': 'Week in Review',
+    'reorder_suggestions': 'Reorder Suggestions',
+    'slow_movers': 'Slow Moving Inventory'
+    }
+    
+    # Enhanced summary with business context awareness
+    summary = _summarize_with_context(resolution.intent, data_payload, db, org_id)
+
+    return ChatQueryResponse(
+        intent=resolution.intent, title=title_map[resolution.intent], answer_summary=summary,
+        data={"columns": data_payload['columns'], "rows": data_payload['rows']},
+        query_explainer=explainer, freshness=freshness, confidence=confidence, source=resolution.source,
+        warnings=[]
+    )
+
+
+def _summarize_with_context(intent: IntentName, payload: dict, db: Session, org_id: str) -> str:
+    """Enhanced summarize with business context awareness."""
+    rows = payload.get('rows', [])
+    if not rows:
+        return 'No data found for your query. This might indicate you need to add inventory data or the specified filters returned no results.'
+    
+    # Base summary
+    base_summary = _summarize(intent, payload)
+    
+    # Add contextual insights
+    if intent == 'top_skus_by_margin':
+        total_margin = sum(r.get('gross_margin', 0) for r in rows)
+        return f"{base_summary} Total margin from top performers: ${total_margin:,.2f}. These products are driving your profitability."
+    
+    elif intent == 'stockout_risk':
+        high_risk = [r for r in rows if r.get('risk_level') == 'high']
+        if high_risk:
+            return f"{base_summary} Immediate action needed on {len(high_risk)} high-risk items to prevent lost sales."
+        else:
+            return f"{base_summary} Your inventory levels look healthy with good stock coverage."
+    
+    elif intent == 'week_in_review':
+        if len(rows) >= 2:
+            # Compare recent days
+            latest_rev = rows[0].get('revenue', 0)
+            prev_rev = rows[1].get('revenue', 0)
+            trend = "up" if latest_rev > prev_rev else "down" if latest_rev < prev_rev else "stable"
+            return f"{base_summary} Daily revenue trend is {trend} compared to previous day."
+        return base_summary
+    
+    elif intent == 'reorder_suggestions':
+        urgent_count = len([r for r in rows if r.get('suggested_order_qty', 0) > 50])
+        if urgent_count > 0:
+            return f"{base_summary} {urgent_count} items need large reorder quantities (>50 units) - consider bulk purchasing."
+        return f"{base_summary} Regular restocking levels suggested."
+    
+    return base_summary
+
+
+def _summarize(intent: IntentName, payload: dict) -> str:
+    rows = payload.get('rows', [])
+    if not rows:
+        return 'No data found for selection.'
+    if intent == 'top_skus_by_margin':
+        top = rows[0]
+        return f"Top SKU {top['sku']} with margin ${top['gross_margin']:.2f}."
+    if intent == 'stockout_risk':
+        high = [r for r in rows if r.get('risk_level') == 'high']
+        return f"{len(high)} high-risk SKUs; {len(rows)} at-risk within horizon." if rows else 'No stockout risks.'
+    if intent == 'week_in_review':
+        total_rev = sum(r['revenue'] for r in rows)
+        return f"Week revenue ${total_rev:.2f} across {len(rows)} days." 
+    if intent == 'reorder_suggestions':
+        return f"{len(rows)} SKUs need reorder; top suggestion qty {rows[0]['suggested_order_qty']}" if rows else 'No reorder needs.'
+    if intent == 'slow_movers':
+        zero_sold = [r for r in rows if r.get('units_sold_period', 0) == 0]
+        return f"{len(rows)} slow movers (including {len(zero_sold)} with zero sales). Top stuck SKU {rows[0]['sku']} with {rows[0]['on_hand']} on hand." if rows else 'No slow movers found.'
+    return 'Summary unavailable.'

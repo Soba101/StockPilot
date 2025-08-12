@@ -32,13 +32,14 @@ class PurchaseOrderItem(PurchaseOrderItemBase):
 
 class PurchaseOrderBase(BaseModel):
     supplier_id: str
-    po_number: str = Field(min_length=1, max_length=50)
+    # Allow blank to request auto-generation in create endpoint
+    po_number: str = Field(default="", max_length=50)
     expected_date: Optional[datetime] = None
     notes: Optional[str] = None
 
 
 class PurchaseOrderCreate(PurchaseOrderBase):
-    items: List[PurchaseOrderItemCreate] = Field(min_items=1, description="At least one item is required")
+    items: List[PurchaseOrderItemCreate] = Field(min_length=1, description="At least one item is required")
 
 
 class PurchaseOrderUpdate(BaseModel):

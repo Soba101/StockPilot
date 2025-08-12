@@ -1,10 +1,9 @@
 from sqlalchemy import Column, String, Integer, Float, DateTime, ForeignKey, Text, Enum
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-import uuid
 import enum
 from app.core.database import Base
+from .base import BaseModel
 
 
 class PurchaseOrderStatus(str, enum.Enum):
@@ -15,12 +14,12 @@ class PurchaseOrderStatus(str, enum.Enum):
     cancelled = "cancelled"
 
 
-class PurchaseOrder(Base):
+class PurchaseOrder(Base, BaseModel):
     __tablename__ = "purchase_orders"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False)
-    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False)
+    # id inherited from BaseModel
+    org_id = Column(BaseModel.UUIDType, ForeignKey("organizations.id"), nullable=False)
+    supplier_id = Column(BaseModel.UUIDType, ForeignKey("suppliers.id"), nullable=False)
     po_number = Column(String(50), nullable=False, unique=True)
     status = Column(Enum(PurchaseOrderStatus), default=PurchaseOrderStatus.draft, nullable=False)
     order_date = Column(DateTime(timezone=True), nullable=True)
@@ -30,7 +29,7 @@ class PurchaseOrder(Base):
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    created_by = Column(UUID(as_uuid=True), nullable=True)
+    created_by = Column(BaseModel.UUIDType, nullable=True)
 
     # Relationships
     organization = relationship("Organization", back_populates="purchase_orders")
@@ -38,12 +37,12 @@ class PurchaseOrder(Base):
     items = relationship("PurchaseOrderItem", back_populates="purchase_order", cascade="all, delete-orphan")
 
 
-class PurchaseOrderItem(Base):
+class PurchaseOrderItem(Base, BaseModel):
     __tablename__ = "purchase_order_items"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    purchase_order_id = Column(UUID(as_uuid=True), ForeignKey("purchase_orders.id"), nullable=False)
-    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
+    # id inherited from BaseModel
+    purchase_order_id = Column(BaseModel.UUIDType, ForeignKey("purchase_orders.id"), nullable=False)
+    product_id = Column(BaseModel.UUIDType, ForeignKey("products.id"), nullable=False)
     quantity = Column(Integer, nullable=False)
     unit_cost = Column(Float, nullable=False)
     total_cost = Column(Float, nullable=False)

@@ -1,50 +1,62 @@
-# Copilot Instructions – StockPilot
+## StockPilot – AI Agent Quick Operating Guide
+Concise, project‑specific rules so agents can act safely & productively. Show diffs only (no full file dumps) and preserve multi‑tenant + event‑sourcing guarantees.
 
-Fast orientation for AI agents; focus on project‑specific patterns (keep answers concrete, show diffs only for changed lines/files).
+### 1. Architecture (Big Picture)
+Flow: FastAPI backend (`backend/app`) ←→ Postgres (core + append‑only `inventory_movements`) + Redis → dbt models (`backend/dbt`) → Analytics/Reports endpoints (`/api/v1/analytics/*`, `/api/v1/reports/*`) → Next.js App Router UI (React Query hooks) → Optional chat intent endpoint `/api/v1/chat/query`.
+Inventory is event‑sourced: on‑hand is derived (NEVER persist a running total). Every business row carries `org_id`; JWT (see `app/core/security.py`) injects `org` + `role`.
 
-## 1. Big Picture Flow
-Inbound data / user actions → FastAPI CRUD + event‑sourced inventory (`inventory_movements`) → dbt transforms (`backend/dbt`, marts under `analytics_marts.*`) → analytics/report endpoints (`/analytics`, `/analytics/sales`, `/analytics/stockout-risk`, `/reports/week-in-review`) → Next.js App Router UI using React Query hooks.
-Multi‑tenant: every core table has `org_id`; JWT (created via `app.core.security.create_access_token`) supplies `org` + `role`. Never return cross‑org rows.
+### 2. Multi‑Tenancy & Auth
+ALWAYS scope DB queries with `Model.org_id == claims.get("org")` (ignore client‑supplied org). Use `Depends(get_current_claims)` for reads; `Depends(require_role("admin"))` for privileged mutations. Never expose IDs from other orgs in responses or errors.
 
-## 2. Backend Conventions
-Routers: register in `api/api_v1/api.py` with prefix `/api/v1` (from settings). New endpoint: create `endpoints/<feature>.py`, add `api_router.include_router` entry.
-Dependencies: always include `claims = Depends(get_current_claims)` then scope queries `Model.org_id == claims.get("org")`.
-Role restriction: `claims = Depends(require_role("admin"))` (see `purchasing.py`).
-Inventory: never store on‑hand; compute via summed movements (see stockout risk + reports queries). New stock logic → append movement rows.
-Analytics fallback: try mart query (`analytics_marts.sales_daily`) inside try/except; on failure, fall back to base tables (pattern in `analytics.get_analytics` revenue + trend sections).
-Stockout risk: combines live on‑hand (aggregate movements) + rolling averages (`units_7day_avg` / `units_30day_avg`) from mart; risk tiers: <=7 high, <=14 medium, <=30 low, else none.
+### 3. Data & Models
+Unified GUID Type: `models/base.py` (`GUID` TypeDecorator). All PKs & FKs use `BaseModel.UUIDType` not raw dialect UUID types.
+Timestamps: `BaseModel` provides `created_at` + `updated_at`; do not redeclare them (e.g. `InventoryMovement` now inherits both).
+Schema Evolution: No Alembic yet. Add columns by (a) updating `backend/init.sql`, (b) adding an idempotent SQL file under `backend/migrations/`, or (c) a one‑off manual `ALTER TABLE` (document it). Keep changes additive.
 
-## 3. dbt Layer
-Location: `backend/dbt/models/{staging,marts}`. Core mart referenced in code: `sales_daily` providing: `units_sold`, `gross_revenue`, `gross_margin`, `margin_percent`, `orders_count`, rolling averages (`units_7day_avg`, `units_30day_avg`). Run & test: `cd backend/dbt && dbt run && dbt test`.
-When adding metrics: extend mart with snake_case columns; preserve existing column names used by API to avoid breaking serializers.
+### 4. Inventory Logic
+Insert a new `InventoryMovement` for every change (`movement_type`: in | out | adjust | transfer). Never update historical quantity or store a consolidated stock count. Summary endpoints aggregate on demand with signed quantities (see inventory endpoint code using `case`).
 
-## 4. Frontend Patterns
-API base resolution & auth handled in `frontend/src/lib/api.ts` (dynamic base + token refresh on 401). Always add endpoints there, then wrap with a React Query hook in `src/hooks/use-*.ts` returning typed data + `loading` / `error`.
-Pages live under `src/app/<feature>/page.tsx`; keep data fetching out of components—import hooks.
-Chat page extends by matching keywords and calling existing hooks (see `app/chat/`).
+### 5. Analytics Pattern
+Always attempt mart table first (e.g. `analytics_marts.sales_daily`). On failure (missing mart / dbt not run) fallback to base tables with equivalent field names. Only ADD new response fields—do not rename existing ones to avoid frontend breakage. Stockout risk: aggregate velocity + classify (<=7 high, <=14 medium, <=30 low, else none).
 
-## 5. Testing & Workflows
-Spin infra: `docker-compose up -d` (Postgres + Redis). Backend: `uvicorn app.main:app --reload --port 8000`. Frontend: `npm run dev`.
-Integration tests (`backend/tests/test_api_integration.py`) call live server using tokens from `create_access_token`; copy pattern for new endpoints (assert shape + status, use time/UUID for uniqueness). Run: `cd backend && pytest`.
-Reset DB (wipe & reseed sample data): `docker-compose down -v && docker-compose up -d`.
+### 6. Chat Layer
+`/api/v1/chat/query`: apply deterministic intent rules first (`services/intent_rules.py`) then, only if enabled by env (`CHAT_ENABLED`, `CHAT_LLM_FALLBACK_ENABLED`), call the LLM client (`services/llm_client.py`). Return confidence + freshness metadata; prefer expanding rules over relying on LLM.
 
-## 6. Adding a Feature (Concrete Steps)
-1. Model (`app/models/*`), include `org_id`, timestamps. 2. Schemas (`app/schemas/*`). 3. Endpoint module with scoped queries + router registration. 4. (Analytics) add/modify dbt model; expose with mart‑first fallback. 5. Frontend: add API method + typed hook + page/component. 6. Integration test.
+### 7. Frontend Conventions
+HTTP wrapper: `frontend/src/lib/api.ts` handles base URL + token refresh. Add a typed function there, then a React Query hook in `frontend/src/hooks/`. Pages stay thin; no direct fetch logic. Compose chat responses via existing hooks mapped from intents.
 
-## 7. Analytics/Mart Query Pattern (Example Skeleton)
+### 8. Tests & Local Dev
+Quick run: `cd backend && DATABASE_URL=sqlite:///./test.db pytest` (SQLite auto‑creates tables). For Postgres: `docker-compose up -d` then run API with uvicorn. Integration tests mint JWTs via `create_access_token`; follow that pattern. Reset Postgres data: `docker-compose down -v && docker-compose up -d` (replays `init.sql`).
+
+### 9. Adding a Feature (Minimal Steps)
+1. Model: subclass `Base` + `BaseModel`; add `org_id` & domain fields (no duplicate timestamps).
+2. Schema: Pydantic (`from_attributes = True`); accept blank server‑generated fields.
+3. Router: new file under `api/api_v1/endpoints`; include in `api/api_v1/api.py`; enforce auth + org filter.
+4. (If analytics) Extend mart + fallback logic—add fields only.
+5. Frontend: api.ts function → hook → page/component.
+6. Tests: CRUD + integration; use GUID fixtures or create objects inside test.
+
+### 10. Guardrails
+Never: persist computed stock, skip org filter, broad `except` hiding root causes, expose other org IDs, redefine BaseModel timestamps.
+Prefer: additive SQL changes, explicit column lists in analytics responses, `model_dump()` (modernize legacy `dict()` usages gradually), small focused diffs.
+
+### 11. Key Paths
+Routers: `backend/app/api/api_v1/endpoints/`
+Models: `backend/app/models/`
+Schemas: `backend/app/schemas/`
+Analytics dbt marts: `backend/dbt/models/marts/`
+Chat: `backend/app/api/api_v1/endpoints/chat.py` + `services/intent_*`
+Migrations (ad hoc): `backend/migrations/`
+Tests: `backend/tests/`
+
+### 12. Example Snippets
+Org‑scoped query pattern:
 ```python
-try:
-	rows = db.execute(text("""SELECT ... FROM analytics_marts.sales_daily WHERE org_id=:org AND ..."""), {"org": org_id}).fetchall()
-	# use mart rows
-except Exception:
-	# fallback: derive from base tables (join Orders/OrderItems/Products)
+products = db.query(Product).filter(Product.org_id == claims.get("org")).all()
+```
+Add movement (event sourcing):
+```python
+db.add(InventoryMovement(product_id=pid, location_id=lid, quantity=delta, movement_type='adjust', timestamp=now))
 ```
 
-## 8. Pitfalls / Guardrails
-Do NOT: store derived stock, omit org filters, bypass `require_role` on admin actions, or couple React components directly to axios (always via hook).
-Keep new analytics resilient: preserve fallback, avoid breaking existing response models, prefer additive columns.
-
-## 9. Key Paths
-Endpoints: `backend/app/api/api_v1/endpoints/` | Models: `backend/app/models/` | Schemas: `backend/app/schemas/` | dbt marts: `backend/dbt/models/marts/` | Frontend hooks: `frontend/src/hooks/` | Tests: `backend/tests/`.
-
-Return diffs only (no full file dumps) when editing; follow above patterns.
+Return only changed lines in patches. Maintain multi‑tenant safety & analytics fallback consistency.

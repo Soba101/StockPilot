@@ -84,7 +84,8 @@ CREATE TABLE inventory_movements (
     notes TEXT,
     timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     created_by UUID, -- Will reference users table when auth is implemented
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Orders table (for sales tracking)

@@ -1,17 +1,16 @@
 from sqlalchemy import Column, String, Integer, Float, ForeignKey, Text
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy import DateTime
-import uuid
 from app.core.database import Base
+from .base import BaseModel
 
 
-class Supplier(Base):
+class Supplier(Base, BaseModel):
     __tablename__ = "suppliers"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False)
+    # id inherited from BaseModel
+    org_id = Column(BaseModel.UUIDType, ForeignKey("organizations.id"), nullable=False)
     name = Column(String(255), nullable=False)
     contact_person = Column(String(255), nullable=True)
     email = Column(String(255), nullable=True)

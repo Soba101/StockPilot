@@ -1,20 +1,18 @@
-from sqlalchemy import Column, String, DateTime, func, CHAR
+from sqlalchemy import Column, String
 from sqlalchemy.orm import relationship
-import uuid
 from app.core.database import Base
 from .base import BaseModel
 
-class Organization(Base):
+class Organization(Base, BaseModel):
+    """Organization model using portable UUID from BaseModel.
+
+    Inherits BaseModel to avoid dialect-specific UUID issues in tests (SQLite) while
+    still using native UUID in Postgres. Previous implementation forced Postgres UUID
+    type causing CompileError under SQLite in unit tests.
+    """
     __tablename__ = "organizations"
-    
-    try:
-        from sqlalchemy.dialects.postgresql import UUID as _PGUUID  # type: ignore
-        id = Column(_PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    except Exception:  # SQLite fallback
-        id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+
     name = Column(String(255), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # Relationships
     locations = relationship("Location", back_populates="organization", cascade="all, delete-orphan")
