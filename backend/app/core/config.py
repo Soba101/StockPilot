@@ -1,4 +1,5 @@
 import os
+import socket
 from typing import List, Union
 from pydantic_settings import BaseSettings
 from pydantic import validator
@@ -30,3 +31,15 @@ class Settings(BaseSettings):
         env_file = ".env"
 
 settings = Settings()
+
+# Optionally append the machine's LAN IP (for dev access from other devices) to allowed origins.
+if os.getenv("ADD_LAN_IP_ORIGIN", "true").lower() in ("1", "true", "yes"): 
+    try:
+        lan_ip = socket.gethostbyname(socket.gethostname())
+        # Basic private network check
+        if any(lan_ip.startswith(prefix) for prefix in ("192.168.", "10.", "172.16.")):
+            lan_origin = f"http://{lan_ip}:3000"
+            if lan_origin not in settings.ALLOWED_ORIGINS:  # type: ignore
+                settings.ALLOWED_ORIGINS.append(lan_origin)  # type: ignore
+    except Exception:
+        pass

@@ -28,6 +28,11 @@ def read_products(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)
     products = db.query(Product).filter(Product.org_id == claims.get("org")).offset(skip).limit(limit).all()
     return products
 
+# Provide non-trailing-slash variant to prevent 307 redirect that may strip Authorization in some client contexts
+@router.get("", response_model=List[schemas.Product], include_in_schema=False)
+def read_products_no_slash(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), claims = Depends(get_current_claims)):
+    return read_products(skip=skip, limit=limit, db=db, claims=claims)
+
 @router.get("/{product_id}", response_model=schemas.Product)
 def read_product(product_id: str, db: Session = Depends(get_db)):
     product = db.query(Product).filter(Product.id == product_id).first()
