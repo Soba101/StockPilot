@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timedelta
 import requests
 import time
+import json
 
 from app.core.security import create_access_token
 
@@ -440,6 +441,340 @@ class TestErrorHandling:
                                json=invalid_product, 
                                headers=auth_headers)
         assert response.status_code == 422  # Validation error
+
+
+class TestReorderSuggestionsIntegration:
+    """Integration tests for W5 reorder suggestions API endpoints"""
+    
+    def test_get_reorder_suggestions_success(self, auth_headers):
+        """Test successful retrieval of reorder suggestions"""
+        response = requests.get(
+            f"{API_BASE}/purchasing/reorder-suggestions",
+            headers=auth_headers
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Check response structure
+        assert "suggestions" in data
+        assert "summary" in data
+        assert "generated_at" in data
+        assert "parameters" in data
+        
+        # Check summary structure
+        summary = data["summary"]
+        assert "total_suggestions" in summary
+        assert "total_recommended_quantity" in summary
+        assert "suppliers_involved" in summary
+        assert "reason_breakdown" in summary
+        assert "strategy_used" in summary
+        
+        # Each suggestion should have required fields
+        for suggestion in data["suggestions"]:
+            assert "product_id" in suggestion
+            assert "sku" in suggestion
+            assert "name" in suggestion
+            assert "on_hand" in suggestion
+            assert "incoming" in suggestion
+            assert "recommended_quantity" in suggestion
+            assert "velocity_source" in suggestion
+            assert "horizon_days" in suggestion
+            assert "reasons" in suggestion
+            assert "adjustments" in suggestion
+    
+    def test_get_reorder_suggestions_with_strategy_filter(self, auth_headers):
+        """Test reorder suggestions with different velocity strategies"""
+        # Test latest strategy
+        response_latest = requests.get(
+            f"{API_BASE}/purchasing/reorder-suggestions?strategy=latest",
+            headers=auth_headers
+        )
+        assert response_latest.status_code == 200
+        data_latest = response_latest.json()
+        
+        # Test conservative strategy
+        response_conservative = requests.get(
+            f"{API_BASE}/purchasing/reorder-suggestions?strategy=conservative",
+            headers=auth_headers
+        )
+        assert response_conservative.status_code == 200
+        data_conservative = response_conservative.json()
+        
+        # Both should return valid data
+        assert data_latest["summary"]["strategy_used"] == "latest"
+        assert data_conservative["summary"]["strategy_used"] == "conservative"
+        
+        # Results may differ between strategies
+        # (we can't guarantee specific differences without knowing the data)
+    
+    def test_get_reorder_suggestions_with_filters(self, auth_headers):
+        """Test reorder suggestions with various filters"""
+        params = {
+            "horizon_days_override": 14,
+            "include_zero_velocity": True,
+            "min_days_cover": 0,
+            "max_days_cover": 60
+        }
+        
+        response = requests.get(
+            f"{API_BASE}/purchasing/reorder-suggestions",
+            headers=auth_headers,
+            params=params
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Check that filters were applied
+        filters_applied = data["summary"]["filters_applied"]
+        assert filters_applied["horizon_days_override"] == 14
+        assert filters_applied["include_zero_velocity"] is True
+        assert filters_applied["min_days_cover"] == 0
+        assert filters_applied["max_days_cover"] == 60
+    
+    def test_get_reorder_suggestions_invalid_strategy(self, auth_headers):
+        """Test reorder suggestions with invalid strategy parameter"""
+        response = requests.get(
+            f"{API_BASE}/purchasing/reorder-suggestions?strategy=invalid",
+            headers=auth_headers
+        )
+        
+        assert response.status_code == 422  # Validation error
+    
+    def test_get_reorder_suggestions_invalid_horizon(self, auth_headers):
+        """Test reorder suggestions with invalid horizon parameter"""
+        response = requests.get(
+            f"{API_BASE}/purchasing/reorder-suggestions?horizon_days_override=0",
+            headers=auth_headers
+        )
+        
+        assert response.status_code == 422  # Should be gt=0
+        
+        response = requests.get(
+            f"{API_BASE}/purchasing/reorder-suggestions?horizon_days_override=400",
+            headers=auth_headers
+        )
+        
+        assert response.status_code == 422  # Should be le=365
+    
+    def test_explain_reorder_suggestion_success(self, auth_headers):
+        """Test successful retrieval of reorder explanation"""
+        # First get a suggestion to explain
+        suggestions_response = requests.get(
+            f"{API_BASE}/purchasing/reorder-suggestions",
+            headers=auth_headers
+        )
+        
+        assert suggestions_response.status_code == 200
+        suggestions_data = suggestions_response.json()
+        
+        if suggestions_data["suggestions"]:
+            # Test explanation for first product
+            product_id = suggestions_data["suggestions"][0]["product_id"]
+            
+            response = requests.get(
+                f"{API_BASE}/purchasing/reorder-suggestions/explain/{product_id}",
+                headers=auth_headers
+            )
+            
+            assert response.status_code == 200
+            explanation = response.json()
+            
+            # Check explanation structure
+            assert "product_id" in explanation
+            assert "sku" in explanation
+            assert "name" in explanation
+            assert "reasons" in explanation
+            assert "adjustments" in explanation
+            
+            # If not skipped, should have additional details
+            if not explanation.get("skipped", False):
+                assert "recommendation" in explanation
+                assert "coverage" in explanation
+                assert "velocity" in explanation
+                assert "explanation" in explanation
+                
+                # Check detailed explanation structure
+                detailed = explanation["explanation"]
+                assert "inputs" in detailed
+                assert "calculations" in detailed
+                assert "logic_path" in detailed
+    
+    def test_explain_reorder_suggestion_not_found(self, auth_headers):
+        """Test explanation for non-existent product"""
+        fake_product_id = str(uuid.uuid4())
+        
+        response = requests.get(
+            f"{API_BASE}/purchasing/reorder-suggestions/explain/{fake_product_id}",
+            headers=auth_headers
+        )
+        
+        assert response.status_code == 404
+    
+    def test_explain_reorder_suggestion_invalid_uuid(self, auth_headers):
+        """Test explanation with invalid UUID"""
+        response = requests.get(
+            f"{API_BASE}/purchasing/reorder-suggestions/explain/not-a-uuid",
+            headers=auth_headers
+        )
+        
+        assert response.status_code == 400
+    
+    def test_create_draft_pos_success(self, auth_headers):
+        """Test successful creation of draft purchase orders"""
+        # First get suggestions
+        suggestions_response = requests.get(
+            f"{API_BASE}/purchasing/reorder-suggestions",
+            headers=auth_headers
+        )
+        
+        assert suggestions_response.status_code == 200
+        suggestions_data = suggestions_response.json()
+        
+        if suggestions_data["suggestions"]:
+            # Select first few products for draft PO
+            selected_products = [
+                s["product_id"] for s in suggestions_data["suggestions"][:2]
+            ]
+            
+            draft_po_data = {
+                "product_ids": selected_products,
+                "strategy": "latest",
+                "auto_number": True
+            }
+            
+            response = requests.post(
+                f"{API_BASE}/purchasing/reorder-suggestions/draft-po",
+                headers=auth_headers,
+                json=draft_po_data
+            )
+            
+            assert response.status_code == 200
+            data = response.json()
+            
+            # Check response structure
+            assert "draft_pos" in data
+            assert "summary" in data
+            assert "created_at" in data
+            
+            # Check summary
+            summary = data["summary"]
+            assert "total_draft_pos" in summary
+            assert "total_items" in summary
+            assert "total_quantity" in summary
+            assert "suppliers" in summary
+            
+            # Check each draft PO structure
+            for po in data["draft_pos"]:
+                assert "supplier_id" in po
+                assert "supplier_name" in po
+                assert "po_number" in po
+                assert "items" in po
+                assert "total_items" in po
+                assert "total_quantity" in po
+                assert "lead_time_days" in po
+                assert "minimum_order_quantity" in po
+                assert "created_at" in po
+                
+                # Check items structure
+                for item in po["items"]:
+                    assert "product_id" in item
+                    assert "sku" in item
+                    assert "product_name" in item
+                    assert "quantity" in item
+                    assert "on_hand" in item
+                    assert "recommended_quantity" in item
+                    assert "reasons" in item
+                    assert "adjustments" in item
+    
+    def test_create_draft_pos_no_products(self, auth_headers):
+        """Test draft PO creation with no products selected"""
+        draft_po_data = {
+            "product_ids": [],
+            "strategy": "latest"
+        }
+        
+        response = requests.post(
+            f"{API_BASE}/purchasing/reorder-suggestions/draft-po",
+            headers=auth_headers,
+            json=draft_po_data
+        )
+        
+        assert response.status_code == 400
+        error_data = response.json()
+        assert "No products selected" in error_data["detail"]
+    
+    def test_create_draft_pos_invalid_product_ids(self, auth_headers):
+        """Test draft PO creation with non-existent product IDs"""
+        fake_product_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+        
+        draft_po_data = {
+            "product_ids": fake_product_ids,
+            "strategy": "latest"
+        }
+        
+        response = requests.post(
+            f"{API_BASE}/purchasing/reorder-suggestions/draft-po",
+            headers=auth_headers,
+            json=draft_po_data
+        )
+        
+        # Should handle gracefully - either 400 or return empty result
+        assert response.status_code in [400, 200]
+        
+        if response.status_code == 200:
+            data = response.json()
+            # Should have no draft POs if no valid suggestions found
+            assert data["summary"]["total_draft_pos"] == 0
+    
+    def test_reorder_suggestions_unauthorized(self):
+        """Test that reorder endpoints require authentication"""
+        # Test without auth headers
+        response = requests.get(f"{API_BASE}/purchasing/reorder-suggestions")
+        assert response.status_code == 401
+        
+        fake_product_id = str(uuid.uuid4())
+        response = requests.get(
+            f"{API_BASE}/purchasing/reorder-suggestions/explain/{fake_product_id}"
+        )
+        assert response.status_code == 401
+        
+        draft_po_data = {"product_ids": [fake_product_id]}
+        response = requests.post(
+            f"{API_BASE}/purchasing/reorder-suggestions/draft-po",
+            json=draft_po_data
+        )
+        assert response.status_code == 401
+    
+    def test_draft_pos_require_admin_role(self, auth_headers):
+        """Test that draft PO creation requires admin role"""
+        # Create a non-admin token
+        regular_token = create_access_token(
+            sub=TEST_USER_ID,
+            org_id=TEST_ORG_ID,
+            role="user"  # Non-admin role
+        )
+        
+        non_admin_headers = {
+            "Authorization": f"Bearer {regular_token}",
+            "Content-Type": "application/json"
+        }
+        
+        draft_po_data = {
+            "product_ids": [str(uuid.uuid4())],
+            "strategy": "latest"
+        }
+        
+        response = requests.post(
+            f"{API_BASE}/purchasing/reorder-suggestions/draft-po",
+            headers=non_admin_headers,
+            json=draft_po_data
+        )
+        
+        # Should require admin role
+        assert response.status_code == 403
+
 
 def test_api_health_check():
     """Test that the API is running and accessible"""

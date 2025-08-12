@@ -2,12 +2,16 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, desc, func
-from datetime import datetime
+from datetime import datetime, timedelta
+from decimal import Decimal
+import uuid
 from app.core.database import get_db, get_current_claims, require_role
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus
 from app.models.supplier import Supplier
 from app.models.product import Product
 from app.schemas import purchasing as schemas
+from app.schemas import reorder as reorder_schemas
+from app.services.reorder import compute_reorder_suggestions, explain_reorder_suggestion
 
 router = APIRouter()
 
@@ -274,3 +278,323 @@ def delete_purchase_order(
     db.commit()
     
     return {"message": "Purchase order deleted successfully"}
+
+
+# ===== REORDER SUGGESTIONS ENDPOINTS =====
+
+@router.get("/reorder-suggestions", response_model=reorder_schemas.ReorderSuggestionsResponse)
+def get_reorder_suggestions(
+    location_id: Optional[str] = Query(None),
+    strategy: str = Query("latest", regex="^(latest|conservative)$"),
+    horizon_days_override: Optional[int] = Query(None, gt=0, le=365),
+    include_zero_velocity: bool = Query(False),
+    min_days_cover: Optional[int] = Query(None, gt=0),
+    max_days_cover: Optional[int] = Query(None, gt=0),
+    db: Session = Depends(get_db),
+    claims = Depends(get_current_claims),
+):
+    """
+    Get reorder suggestions based on velocity, lead times, MOQ, and safety stock.
+    Implements the W5 purchase suggestions algorithm.
+    """
+    
+    org_id_str = claims.get("org")
+    if not org_id_str:
+        raise HTTPException(status_code=401, detail="Organization ID required")
+    
+    org_id = uuid.UUID(org_id_str)
+    location_uuid = uuid.UUID(location_id) if location_id else None
+    
+    # Validate horizon override
+    if horizon_days_override and (horizon_days_override < 1 or horizon_days_override > 365):
+        raise HTTPException(status_code=400, detail="Horizon override must be between 1 and 365 days")
+    
+    try:
+        # Compute suggestions using the reorder service
+        suggestions = compute_reorder_suggestions(
+            org_id=org_id,
+            location_id=location_uuid,
+            strategy=strategy,  # type: ignore
+            horizon_days_override=horizon_days_override
+        )
+        
+        # Apply additional filters
+        filtered_suggestions = []
+        for suggestion in suggestions:
+            # Skip zero velocity products unless explicitly included
+            if not include_zero_velocity and (suggestion.chosen_velocity is None or suggestion.chosen_velocity == 0):
+                continue
+            
+            # Apply coverage filters
+            if min_days_cover and suggestion.days_cover_current and suggestion.days_cover_current < min_days_cover:
+                continue
+            if max_days_cover and suggestion.days_cover_current and suggestion.days_cover_current > max_days_cover:
+                continue
+            
+            filtered_suggestions.append(suggestion)
+        
+        # Convert to response format
+        suggestion_responses = []
+        for suggestion in filtered_suggestions:
+            suggestion_responses.append(reorder_schemas.ReorderSuggestionResponse(
+                product_id=suggestion.product_id,
+                sku=suggestion.sku,
+                name=suggestion.name,
+                supplier_id=suggestion.supplier_id,
+                supplier_name=suggestion.supplier_name,
+                on_hand=suggestion.on_hand,
+                incoming=suggestion.incoming,
+                days_cover_current=suggestion.days_cover_current,
+                days_cover_after=suggestion.days_cover_after,
+                recommended_quantity=suggestion.recommended_quantity,
+                chosen_velocity=suggestion.chosen_velocity,
+                velocity_source=suggestion.velocity_source,
+                horizon_days=suggestion.horizon_days,
+                demand_forecast_units=suggestion.demand_forecast_units,
+                reasons=suggestion.reasons,
+                adjustments=suggestion.adjustments
+            ))
+        
+        # Create summary statistics
+        total_suggestions = len(suggestion_responses)
+        total_recommended_quantity = sum(s.recommended_quantity for s in suggestion_responses)
+        suppliers_involved = len(set(s.supplier_id for s in suggestion_responses if s.supplier_id))
+        
+        # Reason breakdown
+        all_reasons = []
+        for s in suggestion_responses:
+            all_reasons.extend(s.reasons)
+        reason_counts = {}
+        for reason in set(all_reasons):
+            reason_counts[reason] = all_reasons.count(reason)
+        
+        summary = {
+            "total_suggestions": total_suggestions,
+            "total_recommended_quantity": total_recommended_quantity,
+            "suppliers_involved": suppliers_involved,
+            "reason_breakdown": reason_counts,
+            "strategy_used": strategy,
+            "filters_applied": {
+                "include_zero_velocity": include_zero_velocity,
+                "min_days_cover": min_days_cover,
+                "max_days_cover": max_days_cover,
+                "horizon_days_override": horizon_days_override
+            }
+        }
+        
+        # Build request object for response
+        request_params = reorder_schemas.ReorderSuggestionsRequest(
+            location_id=location_uuid,
+            strategy=strategy,  # type: ignore
+            horizon_days_override=horizon_days_override,
+            include_zero_velocity=include_zero_velocity,
+            min_days_cover=min_days_cover,
+            max_days_cover=max_days_cover
+        )
+        
+        return reorder_schemas.ReorderSuggestionsResponse(
+            suggestions=suggestion_responses,
+            summary=summary,
+            generated_at=datetime.utcnow(),
+            parameters=request_params
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error computing reorder suggestions: {str(e)}")
+
+
+@router.get("/reorder-suggestions/explain/{product_id}", response_model=reorder_schemas.ReorderExplanationResponse)
+def explain_reorder_suggestion_endpoint(
+    product_id: str,
+    strategy: str = Query("latest", regex="^(latest|conservative)$"),
+    horizon_days_override: Optional[int] = Query(None, gt=0, le=365),
+    db: Session = Depends(get_db),
+    claims = Depends(get_current_claims),
+):
+    """
+    Get detailed explanation for a single product's reorder calculation.
+    Shows intermediate values and logic path for transparency.
+    """
+    
+    org_id_str = claims.get("org")
+    if not org_id_str:
+        raise HTTPException(status_code=401, detail="Organization ID required")
+    
+    try:
+        org_id = uuid.UUID(org_id_str)
+        product_uuid = uuid.UUID(product_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid UUID format")
+    
+    try:
+        explanation = explain_reorder_suggestion(
+            org_id=org_id,
+            product_id=product_uuid,
+            strategy=strategy,  # type: ignore
+            horizon_days_override=horizon_days_override
+        )
+        
+        if not explanation:
+            raise HTTPException(status_code=404, detail="Product not found or no data available")
+        
+        return reorder_schemas.ReorderExplanationResponse(**explanation)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error explaining reorder suggestion: {str(e)}")
+
+
+@router.post("/reorder-suggestions/draft-po", response_model=reorder_schemas.DraftPOResponse)
+def create_draft_purchase_orders(
+    request: reorder_schemas.DraftPORequest,
+    db: Session = Depends(get_db),
+    claims = Depends(require_role("admin")),
+):
+    """
+    Create draft purchase orders from selected reorder suggestions.
+    Groups by supplier and applies MOQ/pack rounding adjustments.
+    """
+    
+    org_id_str = claims.get("org")
+    if not org_id_str:
+        raise HTTPException(status_code=401, detail="Organization ID required")
+    
+    org_id = uuid.UUID(org_id_str)
+    
+    if not request.product_ids:
+        raise HTTPException(status_code=400, detail="No products selected")
+    
+    try:
+        # Get suggestions for selected products
+        all_suggestions = compute_reorder_suggestions(
+            org_id=org_id,
+            location_id=None,  # TODO: Support location filtering
+            strategy=request.strategy,
+            horizon_days_override=request.horizon_days_override
+        )
+        
+        # Filter to only selected products
+        selected_suggestions = [
+            s for s in all_suggestions 
+            if s.product_id in request.product_ids and s.recommended_quantity > 0
+        ]
+        
+        if not selected_suggestions:
+            raise HTTPException(status_code=400, detail="No valid suggestions found for selected products")
+        
+        # Group by supplier
+        supplier_groups = {}
+        for suggestion in selected_suggestions:
+            supplier_id = suggestion.supplier_id
+            if not supplier_id:
+                continue  # Skip products without suppliers
+            
+            if supplier_id not in supplier_groups:
+                supplier_groups[supplier_id] = []
+            supplier_groups[supplier_id].append(suggestion)
+        
+        if not supplier_groups:
+            raise HTTPException(status_code=400, detail="No suppliers found for selected products")
+        
+        # Create draft POs
+        draft_pos = []
+        po_counter = 1
+        
+        for supplier_id, suggestions in supplier_groups.items():
+            # Get supplier details
+            supplier = db.query(Supplier).filter(
+                Supplier.id == supplier_id,
+                Supplier.org_id == org_id
+            ).first()
+            
+            if not supplier:
+                continue  # Skip if supplier not found
+            
+            # Generate PO number
+            if request.auto_number:
+                base_po_number = generate_po_number(db, org_id_str)
+                if len(supplier_groups) > 1:
+                    po_number = f"{base_po_number}-{po_counter:02d}"
+                    po_counter += 1
+                else:
+                    po_number = base_po_number
+            else:
+                po_number = f"DRAFT-{datetime.utcnow().strftime('%Y%m%d')}-{po_counter:02d}"
+                po_counter += 1
+            
+            # Create items
+            draft_items = []
+            total_quantity = 0
+            estimated_total = Decimal('0.00')
+            
+            for suggestion in suggestions:
+                # Get product details for costing
+                product = db.query(Product).filter(
+                    Product.id == suggestion.product_id,
+                    Product.org_id == org_id
+                ).first()
+                
+                unit_cost = product.cost if product and product.cost else None
+                line_total = None
+                if unit_cost:
+                    line_total = unit_cost * suggestion.recommended_quantity
+                    estimated_total += line_total
+                
+                draft_item = reorder_schemas.DraftPOItem(
+                    product_id=suggestion.product_id,
+                    sku=suggestion.sku,
+                    product_name=suggestion.name,
+                    quantity=suggestion.recommended_quantity,
+                    unit_cost=unit_cost,
+                    line_total=line_total,
+                    on_hand=suggestion.on_hand,
+                    recommended_quantity=suggestion.recommended_quantity,
+                    reasons=suggestion.reasons,
+                    adjustments=suggestion.adjustments
+                )
+                draft_items.append(draft_item)
+                total_quantity += suggestion.recommended_quantity
+            
+            # Calculate expected delivery
+            expected_delivery = None
+            if supplier.lead_time_days:
+                expected_delivery = datetime.utcnow() + timedelta(days=supplier.lead_time_days)
+            
+            draft_po = reorder_schemas.DraftPO(
+                supplier_id=supplier_id,
+                supplier_name=supplier.name,
+                po_number=po_number,
+                items=draft_items,
+                total_items=len(draft_items),
+                total_quantity=total_quantity,
+                estimated_total=estimated_total if estimated_total > 0 else None,
+                lead_time_days=supplier.lead_time_days,
+                minimum_order_quantity=supplier.minimum_order_quantity,
+                payment_terms=supplier.payment_terms,
+                created_at=datetime.utcnow(),
+                expected_delivery=expected_delivery
+            )
+            
+            draft_pos.append(draft_po)
+        
+        # Create summary
+        total_draft_pos = len(draft_pos)
+        total_items = sum(po.total_items for po in draft_pos)
+        total_quantity_all = sum(po.total_quantity for po in draft_pos)
+        total_estimated = sum(po.estimated_total for po in draft_pos if po.estimated_total)
+        
+        summary = {
+            "total_draft_pos": total_draft_pos,
+            "total_items": total_items,
+            "total_quantity": total_quantity_all,
+            "total_estimated_value": total_estimated if total_estimated > 0 else None,
+            "suppliers": [po.supplier_name for po in draft_pos]
+        }
+        
+        return reorder_schemas.DraftPOResponse(
+            draft_pos=draft_pos,
+            summary=summary,
+            created_at=datetime.utcnow()
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating draft purchase orders: {str(e)}")

@@ -16,3 +16,61 @@ models:
         description: Simple projected 30 day units using best available velocity * 30.
         tests:
           - custom_non_negative
+
+  - name: reorder_inputs
+    description: Comprehensive reorder inputs combining products, suppliers, velocity, inventory, and inbound POs.
+    tests:
+      - unique:
+          column_name: "concat(org_id::text, '-', product_id::text)"
+    columns:
+      - name: org_id
+        description: Organization identifier
+        tests:
+          - not_null
+      - name: product_id
+        description: Product identifier
+        tests:
+          - not_null
+      - name: sku
+        description: Product SKU
+        tests:
+          - not_null
+      - name: on_hand
+        description: Current inventory on hand from movements
+        tests:
+          - not_null
+      - name: safety_stock_days
+        description: Safety stock buffer in days
+        tests:
+          - not_null
+          - custom_non_negative
+      - name: pack_size
+        description: Minimum pack/case size for ordering
+        tests:
+          - not_null
+          - custom_non_negative
+      - name: lead_time_days
+        description: Supplier lead time in days
+        tests:
+          - not_null
+          - custom_non_negative
+      - name: moq
+        description: Minimum order quantity
+        tests:
+          - not_null
+          - custom_non_negative
+      - name: horizon_days
+        description: Computed reorder horizon (lead time + safety stock)
+        tests:
+          - not_null
+          - custom_non_negative
+      - name: incoming_units_total
+        description: Total incoming units from pending POs
+        tests:
+          - not_null
+          - custom_non_negative
+      - name: incoming_units_30d
+        description: Incoming units expected within 30 days
+        tests:
+          - not_null
+          - custom_non_negative

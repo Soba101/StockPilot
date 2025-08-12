@@ -95,6 +95,61 @@ sources:
             tests:
               - not_null
 
+      - name: suppliers
+        description: Supplier information for purchasing
+        columns:
+          - name: id
+            description: Primary key
+            tests:
+              - unique
+              - not_null
+          - name: name
+            description: Supplier name
+            tests:
+              - not_null
+          - name: lead_time_days
+            description: Lead time in days
+          - name: minimum_order_quantity
+            description: Minimum order quantity
+
+      - name: purchase_orders
+        description: Purchase orders
+        columns:
+          - name: id
+            description: Primary key
+            tests:
+              - unique
+              - not_null
+          - name: supplier_id
+            description: Reference to suppliers table
+            tests:
+              - not_null
+          - name: status
+            description: PO status
+            tests:
+              - not_null
+
+      - name: purchase_order_items
+        description: Items within purchase orders
+        columns:
+          - name: id
+            description: Primary key
+            tests:
+              - unique
+              - not_null
+          - name: purchase_order_id
+            description: Reference to purchase_orders table
+            tests:
+              - not_null
+          - name: product_id
+            description: Reference to products table
+            tests:
+              - not_null
+          - name: quantity
+            description: Quantity ordered
+            tests:
+              - not_null
+
 models:
   - name: stg_products
     description: Staged product data with clean column names

@@ -148,6 +148,79 @@ ALERT_DAILY_HOUR=8
 
 `ALERT_CRON_TOKEN` secures the internal `POST /api/v1/internal/run-daily-alerts` endpoint.
 If SMTP / webhook settings are blank the system logs digest output instead of erroring
+
+## Reorder Computation (W5)
+
+The purchase suggestions algorithm computes intelligent reorder recommendations using velocity forecasting, lead times, safety stock, and supplier constraints.
+
+### Algorithm Overview
+
+```
+horizon_days = max(7, lead_time_days + safety_stock_days)
+demand_forecast = chosen_velocity × horizon_days
+net_available = on_hand + incoming_units_within_horizon  
+raw_shortfall = max(0, demand_forecast - net_available)
+```
+
+### Adjustment Sequence
+
+1. **Reorder Point Bump**: If `on_hand < reorder_point`, ensure minimum `reorder_point - on_hand`
+2. **MOQ Enforcement**: If quantity > 0 and < MOQ, raise to MOQ
+3. **Pack Rounding**: Round up to nearest multiple of `pack_size`
+4. **Max Stock Capping**: Limit total coverage ≤ `max_stock_days`
+5. **Guardrails**: Skip zero-velocity products unless below reorder point
+
+### Velocity Strategies
+
+- **Latest**: Priority 7d → 30d → 56d (most recent available)
+- **Conservative**: Minimum non-zero velocity across time windows
+
+### API Usage
+
+```bash
+# Get reorder suggestions
+GET /api/v1/purchasing/reorder-suggestions?strategy=latest
+
+# Explain calculation for specific product  
+GET /api/v1/purchasing/reorder-suggestions/explain/{product_id}
+
+# Create draft purchase orders
+POST /api/v1/purchasing/reorder-suggestions/draft-po
+{
+  "product_ids": ["uuid1", "uuid2"],
+  "strategy": "conservative",
+  "auto_number": true
+}
+```
+
+### Example Calculation
+
+Product: Widget-001
+- On hand: 15 units
+- Lead time: 10 days
+- Safety stock: 5 days  
+- Velocity: 2.5 units/day (7d average)
+- MOQ: 50 units
+- Pack size: 12
+
+**Calculation:**
+1. Horizon: max(7, 10+5) = 15 days
+2. Demand forecast: 2.5 × 15 = 37.5 units
+3. Net available: 15 + 0 = 15 units
+4. Raw shortfall: max(0, 37.5 - 15) = 22.5 units
+5. MOQ enforcement: max(22.5, 50) = 50 units
+6. Pack rounding: ceil(50/12) × 12 = 60 units
+7. **Final recommendation: 60 units**
+
+### Frontend Access
+
+Visit `/purchasing/suggestions` to:
+- View AI-powered reorder recommendations
+- Filter by velocity strategy, coverage days, suppliers
+- Select products and create draft POs in one click
+- Export suggestions to CSV
+- View detailed explanations for each recommendation
+
 ---
 
 Concise docs intentionally; see code & tests for authoritative patterns.
