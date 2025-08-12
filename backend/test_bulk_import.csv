@@ -1,0 +1,4 @@
+SKU,Name,Category,Cost,Price,Reorder Point,Unit of Measure
+BULK-TEST-001,Bulk Import Test Product 1,Test Imports,12.50,29.99,15,each
+BULK-TEST-002,Bulk Import Test Product 2,Test Imports,8.75,19.99,20,each
+BULK-TEST-003,Bulk Import Test Product 3,Test Imports,25.00,59.99,5,box

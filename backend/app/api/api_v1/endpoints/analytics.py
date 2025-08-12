@@ -1,8 +1,8 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
-from datetime import datetime, timedelta
+from sqlalchemy import func, desc, text
+from datetime import datetime, timedelta, date
 from app.core.database import get_db, get_current_claims
 from app.models.product import Product
 from app.models.order import Order, OrderItem
@@ -56,6 +56,39 @@ class AnalyticsResponse(BaseModel):
     revenue_trend: List[RevenuePoint]
 
 
+class DailySalesData(BaseModel):
+    sales_date: str
+    channel: str
+    location_name: str
+    product_name: str
+    sku: str
+    category: str
+    units_sold: int
+    gross_revenue: float
+    gross_margin: float
+    margin_percent: float
+    orders_count: int
+    units_7day_avg: float
+    units_30day_avg: float
+
+
+class ChannelPerformance(BaseModel):
+    channel: str
+    total_revenue: float
+    total_units: int
+    orders_count: int
+    avg_order_value: float
+    margin_percent: float
+
+
+class SalesAnalyticsResponse(BaseModel):
+    period_summary: dict
+    daily_sales: List[DailySalesData]
+    channel_performance: List[ChannelPerformance]
+    top_performing_products: List[dict]
+    trending_analysis: dict
+
+
 @router.get("/analytics", response_model=AnalyticsResponse)
 def get_analytics(
     days: int = Query(30, ge=1, le=90, description="Number of days to analyze"),
@@ -69,19 +102,52 @@ def get_analytics(
     # Get all orders for this organization
     orders = db.query(Order).filter(Order.org_id == org_id).all()
     
-    # Basic sales metrics (all time for simplicity)
-    fulfilled_orders = [o for o in orders if o.status == 'fulfilled']
-    total_revenue = sum(float(order.total_amount or 0) for order in fulfilled_orders)
-    total_orders = len(fulfilled_orders)
-    avg_order_value = total_revenue / total_orders if total_orders > 0 else 0
+    # Enhanced sales metrics using sales_daily mart for recent period
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=days)
     
-    # Get order items for units calculation
-    order_items = db.query(OrderItem).join(Order).filter(
-        Order.org_id == org_id,
-        Order.status == 'fulfilled'
-    ).all()
+    # Get metrics from sales_daily mart if available
+    mart_query = """
+        SELECT 
+            sum(gross_revenue) as total_revenue,
+            sum(units_sold) as total_units,
+            sum(orders_count) as total_orders,
+            avg(margin_percent) as avg_margin
+        FROM analytics_marts.sales_daily
+        WHERE org_id = :org_id
+          AND sales_date BETWEEN :start_date AND :end_date
+    """
     
-    total_units = sum(item.quantity for item in order_items)
+    try:
+        mart_result = db.execute(text(mart_query), {
+            "org_id": org_id,
+            "start_date": start_date,
+            "end_date": end_date
+        }).fetchone()
+        
+        if mart_result and mart_result.total_revenue:
+            # Use mart data
+            total_revenue = float(mart_result.total_revenue)
+            total_units = int(mart_result.total_units)
+            total_orders = int(mart_result.total_orders)
+            avg_order_value = total_revenue / total_orders if total_orders > 0 else 0
+        else:
+            raise Exception("No mart data available")
+            
+    except Exception:
+        # Fall back to original method if mart is not available
+        fulfilled_orders = [o for o in orders if o.status == 'fulfilled']
+        total_revenue = sum(float(order.total_amount or 0) for order in fulfilled_orders)
+        total_orders = len(fulfilled_orders)
+        avg_order_value = total_revenue / total_orders if total_orders > 0 else 0
+        
+        # Get order items for units calculation
+        order_items = db.query(OrderItem).join(Order).filter(
+            Order.org_id == org_id,
+            Order.status == 'fulfilled'
+        ).all()
+        
+        total_units = sum(item.quantity for item in order_items)
     
     sales_metrics = SalesMetrics(
         total_revenue=total_revenue,
@@ -169,27 +235,58 @@ def get_analytics(
             channel=row.channel or 'Unknown'
         ))
     
-    # Revenue trend (simplified - just use order dates)
+    # Enhanced revenue trend using sales_daily mart
     revenue_trend = []
-    if fulfilled_orders:
-        # Group orders by date
-        from collections import defaultdict
-        daily_revenue = defaultdict(float)
+    
+    try:
+        trend_query = """
+            SELECT 
+                sales_date,
+                sum(gross_revenue) as daily_revenue
+            FROM analytics_marts.sales_daily
+            WHERE org_id = :org_id
+              AND sales_date >= :trend_start_date
+            GROUP BY sales_date
+            ORDER BY sales_date
+        """
         
-        for order in fulfilled_orders:
-            if order.ordered_at:
-                date_str = order.ordered_at.strftime('%m-%d')
-                daily_revenue[date_str] += float(order.total_amount or 0)
+        trend_start_date = end_date - timedelta(days=7)  # Last 7 days
+        trend_result = db.execute(text(trend_query), {
+            "org_id": org_id,
+            "trend_start_date": trend_start_date
+        }).fetchall()
         
-        # Convert to list and fill in missing days with 0
-        for date_str, revenue in daily_revenue.items():
-            revenue_trend.append(RevenuePoint(
-                date=date_str,
-                revenue=revenue
-            ))
-        
-        # Sort by date
-        revenue_trend.sort(key=lambda x: x.date)
+        if trend_result:
+            for row in trend_result:
+                revenue_trend.append(RevenuePoint(
+                    date=row.sales_date.strftime('%m-%d'),
+                    revenue=float(row.daily_revenue)
+                ))
+        else:
+            raise Exception("No mart trend data available")
+            
+    except Exception:
+        # Fall back to original method
+        fulfilled_orders = [o for o in orders if o.status == 'fulfilled']
+        if fulfilled_orders:
+            # Group orders by date
+            from collections import defaultdict
+            daily_revenue = defaultdict(float)
+            
+            for order in fulfilled_orders:
+                if order.ordered_at:
+                    date_str = order.ordered_at.strftime('%m-%d')
+                    daily_revenue[date_str] += float(order.total_amount or 0)
+            
+            # Convert to list and fill in missing days with 0
+            for date_str, revenue in daily_revenue.items():
+                revenue_trend.append(RevenuePoint(
+                    date=date_str,
+                    revenue=revenue
+                ))
+            
+            # Sort by date
+            revenue_trend.sort(key=lambda x: x.date)
     
     # If no revenue trend data, create some basic data points
     if not revenue_trend:
@@ -207,4 +304,202 @@ def get_analytics(
         category_data=category_data,
         recent_sales=recent_sales,
         revenue_trend=revenue_trend
+    )
+
+
+@router.get("/sales", response_model=SalesAnalyticsResponse)
+def get_sales_analytics(
+    start_date: Optional[date] = Query(None, description="Start date for analysis"),
+    end_date: Optional[date] = Query(None, description="End date for analysis"),
+    days: int = Query(30, ge=1, le=90, description="Number of days to analyze (if dates not provided)"),
+    channel: Optional[str] = Query(None, description="Filter by sales channel"),
+    product_category: Optional[str] = Query(None, description="Filter by product category"),
+    db: Session = Depends(get_db),
+    claims = Depends(get_current_claims),
+):
+    """Get detailed sales analytics from the sales_daily dbt mart"""
+    
+    org_id = claims.get("org")
+    
+    # Set date range
+    if not end_date:
+        end_date = datetime.now().date()
+    if not start_date:
+        start_date = end_date - timedelta(days=days)
+    
+    # Query the sales_daily mart
+    base_query = """
+        SELECT 
+            sales_date,
+            channel,
+            location_name,
+            product_name,
+            sku,
+            category,
+            units_sold,
+            gross_revenue,
+            gross_margin,
+            margin_percent,
+            orders_count,
+            coalesce(units_7day_avg, 0) as units_7day_avg,
+            coalesce(units_30day_avg, 0) as units_30day_avg
+        FROM analytics_marts.sales_daily
+        WHERE org_id = :org_id
+          AND sales_date BETWEEN :start_date AND :end_date
+    """
+    
+    params = {
+        "org_id": org_id,
+        "start_date": start_date,
+        "end_date": end_date
+    }
+    
+    # Add filters
+    if channel:
+        base_query += " AND channel = :channel"
+        params["channel"] = channel
+    
+    if product_category:
+        base_query += " AND category = :product_category"
+        params["product_category"] = product_category
+    
+    base_query += " ORDER BY sales_date DESC, gross_revenue DESC"
+    
+    # Execute query
+    result = db.execute(text(base_query), params)
+    daily_sales_raw = result.fetchall()
+    
+    # Convert to Pydantic models
+    daily_sales = []
+    for row in daily_sales_raw:
+        daily_sales.append(DailySalesData(
+            sales_date=row.sales_date.strftime('%Y-%m-%d'),
+            channel=row.channel or 'Unknown',
+            location_name=row.location_name or 'Unknown',
+            product_name=row.product_name,
+            sku=row.sku,
+            category=row.category or 'Uncategorized',
+            units_sold=int(row.units_sold),
+            gross_revenue=float(row.gross_revenue),
+            gross_margin=float(row.gross_margin),
+            margin_percent=float(row.margin_percent),
+            orders_count=int(row.orders_count),
+            units_7day_avg=float(row.units_7day_avg),
+            units_30day_avg=float(row.units_30day_avg)
+        ))
+    
+    # Calculate period summary
+    total_revenue = sum(row.gross_revenue for row in daily_sales_raw)
+    total_units = sum(row.units_sold for row in daily_sales_raw)
+    total_margin = sum(row.gross_margin for row in daily_sales_raw)
+    total_orders = sum(row.orders_count for row in daily_sales_raw)
+    
+    period_summary = {
+        "total_revenue": float(total_revenue),
+        "total_units": int(total_units),
+        "total_margin": float(total_margin),
+        "total_orders": int(total_orders),
+        "avg_order_value": float(total_revenue / total_orders) if total_orders > 0 else 0,
+        "avg_margin_percent": float(total_margin / total_revenue * 100) if total_revenue > 0 else 0,
+        "date_range": {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "days": (end_date - start_date).days + 1
+        }
+    }
+    
+    # Channel performance analysis
+    channel_query = """
+        SELECT 
+            channel,
+            sum(gross_revenue) as total_revenue,
+            sum(units_sold) as total_units,
+            sum(orders_count) as orders_count,
+            avg(margin_percent) as avg_margin_percent
+        FROM analytics_marts.sales_daily
+        WHERE org_id = :org_id
+          AND sales_date BETWEEN :start_date AND :end_date
+        GROUP BY channel
+        ORDER BY total_revenue DESC
+    """
+    
+    channel_result = db.execute(text(channel_query), params)
+    channel_data = []
+    for row in channel_result.fetchall():
+        channel_data.append(ChannelPerformance(
+            channel=row.channel or 'Unknown',
+            total_revenue=float(row.total_revenue),
+            total_units=int(row.total_units),
+            orders_count=int(row.orders_count),
+            avg_order_value=float(row.total_revenue / row.orders_count) if row.orders_count > 0 else 0,
+            margin_percent=float(row.avg_margin_percent)
+        ))
+    
+    # Top performing products
+    top_products_query = """
+        SELECT 
+            product_name,
+            sku,
+            category,
+            sum(gross_revenue) as total_revenue,
+            sum(units_sold) as total_units,
+            avg(margin_percent) as avg_margin_percent,
+            avg(units_7day_avg) as avg_velocity
+        FROM analytics_marts.sales_daily
+        WHERE org_id = :org_id
+          AND sales_date BETWEEN :start_date AND :end_date
+        GROUP BY product_name, sku, category
+        ORDER BY total_revenue DESC
+        LIMIT 10
+    """
+    
+    top_products_result = db.execute(text(top_products_query), params)
+    top_performing_products = []
+    for row in top_products_result.fetchall():
+        top_performing_products.append({
+            "product_name": row.product_name,
+            "sku": row.sku,
+            "category": row.category or 'Uncategorized',
+            "total_revenue": float(row.total_revenue),
+            "total_units": int(row.total_units),
+            "avg_margin_percent": float(row.avg_margin_percent),
+            "avg_velocity": float(row.avg_velocity)
+        })
+    
+    # Trending analysis
+    trending_analysis = {
+        "growth_products": [],
+        "declining_products": [],
+        "volatile_products": []
+    }
+    
+    # Simple trending analysis based on 7-day vs 30-day averages
+    if daily_sales_raw:
+        for row in daily_sales_raw:
+            if row.units_30day_avg > 0:
+                trend_ratio = row.units_7day_avg / row.units_30day_avg
+                
+                if trend_ratio > 1.2:  # 20% above average
+                    trending_analysis["growth_products"].append({
+                        "product_name": row.product_name,
+                        "sku": row.sku,
+                        "trend_ratio": round(trend_ratio, 2)
+                    })
+                elif trend_ratio < 0.8:  # 20% below average
+                    trending_analysis["declining_products"].append({
+                        "product_name": row.product_name,
+                        "sku": row.sku,
+                        "trend_ratio": round(trend_ratio, 2)
+                    })
+        
+        # Limit to top 5 each
+        trending_analysis["growth_products"] = trending_analysis["growth_products"][:5]
+        trending_analysis["declining_products"] = trending_analysis["declining_products"][:5]
+    
+    return SalesAnalyticsResponse(
+        period_summary=period_summary,
+        daily_sales=daily_sales,
+        channel_performance=channel_data,
+        top_performing_products=top_performing_products,
+        trending_analysis=trending_analysis
     )

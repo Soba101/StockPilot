@@ -3,7 +3,51 @@ version: 2
 sources:
   - name: stockpilot
     description: Raw StockPilot application data
+    schema: public
     tables:
+      - name: orders
+        description: Sales orders
+        columns:
+          - name: id
+            description: Primary key
+            tests:
+              - unique
+              - not_null
+          - name: order_number
+            description: Human readable order number
+            tests:
+              - not_null
+          - name: channel
+            description: Sales channel (online, pos, phone)
+          - name: total_amount
+            description: Total order amount
+            tests:
+              - not_null
+
+      - name: order_items
+        description: Individual items within orders
+        columns:
+          - name: id
+            description: Primary key
+            tests:
+              - unique
+              - not_null
+          - name: order_id
+            description: Reference to orders table
+            tests:
+              - not_null
+          - name: product_id
+            description: Reference to products table
+            tests:
+              - not_null
+          - name: quantity
+            description: Quantity ordered
+            tests:
+              - not_null
+          - name: unit_price
+            description: Price per unit
+            tests:
+              - not_null
       - name: products
         description: Product catalog
         columns:
@@ -85,4 +129,42 @@ models:
         description: Primary key
         tests:
           - unique
+          - not_null
+
+  - name: stg_orders
+    description: Staged orders data with clean column names
+    columns:
+      - name: order_id
+        description: Primary key
+        tests:
+          - unique
+          - not_null
+      - name: order_number
+        description: Human readable order number
+        tests:
+          - not_null
+      - name: channel
+        description: Sales channel (online, pos, phone)
+      - name: total_amount
+        description: Total order amount
+
+  - name: stg_order_items
+    description: Staged order items data with calculated totals
+    columns:
+      - name: order_item_id
+        description: Primary key
+        tests:
+          - unique
+          - not_null
+      - name: order_id
+        description: Foreign key to orders
+        tests:
+          - not_null
+      - name: product_id
+        description: Foreign key to products
+        tests:
+          - not_null
+      - name: line_total
+        description: Total for this line item after discount
+        tests:
           - not_null
