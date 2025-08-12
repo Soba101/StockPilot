@@ -101,7 +101,7 @@ class StockoutRisk(BaseModel):
     risk_level: str  # none|low|medium|high
 
 
-@router.get("/analytics", response_model=AnalyticsResponse)
+@router.get("", response_model=AnalyticsResponse)
 def get_analytics(
     days: int = Query(30, ge=1, le=90, description="Number of days to analyze"),
     db: Session = Depends(get_db),

@@ -8,5 +8,5 @@ api_router.include_router(products.router, prefix="/products", tags=["products"]
 api_router.include_router(inventory.router, prefix="/inventory", tags=["inventory"])
 api_router.include_router(purchasing.router, prefix="/purchasing", tags=["purchasing"])
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
-api_router.include_router(analytics.router, tags=["analytics"])
+api_router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
