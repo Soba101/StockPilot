@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { ArrowLeft, Plus, ShoppingCart } from 'lucide-react'
+import { ArrowLeft, Plus, ShoppingCart, Lightbulb } from 'lucide-react'
 import { usePurchaseOrders } from '@/hooks/use-purchasing'
 
 export default function PurchasingPage() {
@@ -34,6 +34,12 @@ export default function PurchasingPage() {
           <p className="text-muted-foreground">Create POs, manage suppliers, and restock inventory</p>
         </div>
         <div className="flex gap-2">
+          <Button asChild variant="outline">
+            <Link href="/purchasing/suggestions">
+              <Lightbulb className="h-4 w-4 mr-2" />
+              Purchase Suggestions
+            </Link>
+          </Button>
           <Button asChild>
             <Link href="/purchasing/new">
               <Plus className="h-4 w-4 mr-2" />

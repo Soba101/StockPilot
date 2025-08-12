@@ -96,9 +96,9 @@ def compute_reorder_suggestions(
             horizon_days,
             missing_supplier,
             no_velocity_data
-        FROM reorder_inputs 
+        FROM analytics_marts.reorder_inputs 
         WHERE org_id = :org_id
-        AND supplier_is_active != 'false'  -- Only active suppliers
+        -- Note: Temporarily allowing products without active suppliers for demo purposes
         ORDER BY product_name
     """)
     
@@ -135,10 +135,10 @@ def _compute_single_product_suggestion(
     """
     
     # Extract row data
-    product_id = uuid.UUID(row.product_id)
+    product_id = row.product_id if isinstance(row.product_id, uuid.UUID) else uuid.UUID(row.product_id)
     sku = row.sku
     name = row.product_name
-    supplier_id = uuid.UUID(row.supplier_id) if row.supplier_id else None
+    supplier_id = row.supplier_id if isinstance(row.supplier_id, uuid.UUID) else (uuid.UUID(row.supplier_id) if row.supplier_id else None)
     supplier_name = row.supplier_name
     on_hand = int(row.on_hand or 0)
     reorder_point = int(row.reorder_point or 0)
