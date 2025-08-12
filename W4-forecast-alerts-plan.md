@@ -51,6 +51,7 @@ All scope items below have been delivered and merged except the explicitly optio
 ## Technical Implementation Details
 
 ### 1. dbt Changes
+
 File: `backend/dbt/models/marts/sales_daily.sql`
 
 Add 56‑day moving average window column:
@@ -139,6 +140,7 @@ ALERT_DAILY_HOUR=08        # hour (24h) cron should invoke endpoint
 Extend `core/config.py` with Pydantic settings + safe defaults (empty strings / None) and parsed int for hour.
 
 ### 7. Performance Notes
+
 On‑hand aggregation remains runtime sum of movements; acceptable for current scale. Future: consider materialized daily inventory snapshot if latency grows. Ensure indices exist: `(product_id, movement_type)`, `(org_id, product_id)`.
 
 ---
