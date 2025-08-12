@@ -41,7 +41,7 @@ export default function ReorderSuggestionsPage() {
   // Filter state
   const [filters, setFilters] = useState<ReorderSuggestionsRequest>({
     strategy: 'latest',
-    include_zero_velocity: false,
+    include_zero_velocity: true,
   });
   
   // Selection state
