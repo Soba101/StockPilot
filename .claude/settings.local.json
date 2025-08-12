@@ -4,5 +4,6 @@
       "Bash(docker exec:*)"
     ],
     "deny": []
-  }
+  },
+  "enableAllProjectMcpServers": false
 }

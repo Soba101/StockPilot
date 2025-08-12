@@ -88,13 +88,16 @@ lsof -i :5432  # Check if local PostgreSQL conflicts with Docker port
 - **InventoryMovement** - Event sourcing for all transactions (in/out/adjust/transfer)
 - **Supplier** - Vendor info with lead_time_days, minimum_order_quantity
 - **Order/OrderItem** - Sales tracking
+- **PurchaseOrder/PurchaseOrderItem** - Purchase order management with status tracking
 
 ### Key Relationships
 ```
-Organization (1) → (many) Locations, Products
+Organization (1) → (many) Locations, Products, Suppliers, PurchaseOrders
 Product (1) → (many) InventoryMovements  
 Location (1) → (many) InventoryMovements
 Order (1) → (many) OrderItems
+Supplier (1) → (many) PurchaseOrders
+PurchaseOrder (1) → (many) PurchaseOrderItems
 ```
 
 ### dbt Models Structure
@@ -111,7 +114,9 @@ Order (1) → (many) OrderItems
 ├── products.py - CRUD operations
 ├── organizations.py - Org management
 ├── locations.py - Location management
-└── inventory.py - Movement tracking
+├── inventory.py - Movement tracking
+├── analytics.py - Reporting data endpoints
+└── purchasing.py - Purchase order management
 ```
 
 ### Key Patterns
@@ -129,12 +134,15 @@ Order (1) → (many) OrderItems
 ├── page.tsx - Homepage with navigation cards
 ├── dashboard/ - KPI dashboard with stockout alerts
 ├── products/ - Product management and bulk import
-└── analytics/ - Reporting interface
+├── inventory/ - Movement tracking and adjustments
+├── purchasing/ - Purchase order management
+├── analytics/ - Reporting interface
+└── chat/ - AI-powered inventory chat
 ```
 
 ### Component Patterns
 - **shadcn/ui components** in `/components/ui/`
-- **React Query hooks** for server state (use-products, use-organizations)
+- **React Query hooks** for server state (use-products, use-organizations, use-purchasing, use-analytics)
 - **Axios client** in `/lib/api.ts` with error handling
 - **TypeScript types** in `/types/` matching backend schemas
 

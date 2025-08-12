@@ -15,3 +15,5 @@ class Organization(Base):
     # Relationships
     locations = relationship("Location", back_populates="organization", cascade="all, delete-orphan")
     products = relationship("Product", back_populates="organization", cascade="all, delete-orphan")
+    suppliers = relationship("Supplier", back_populates="organization", cascade="all, delete-orphan")
+    purchase_orders = relationship("PurchaseOrder", back_populates="organization", cascade="all, delete-orphan")

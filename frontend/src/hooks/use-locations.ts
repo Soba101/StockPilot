@@ -1,21 +1,20 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { locationsApi } from '@/lib/api';
-
-export interface Location {
-  id: string;
-  org_id: string;
-  name: string;
-  type: string;
-  address?: string;
-  created_at: string;
-  updated_at: string;
-}
+import { Location } from '@/types';
 
 export function useLocations() {
-  return useQuery<Location[], Error>({
+  const query = useQuery<Location[], Error>({
     queryKey: ['locations'],
     queryFn: () => locationsApi.list().then(res => res.data),
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
+
+  return {
+    locations: query.data,
+    loading: query.isLoading,
+    error: query.error?.message,
+    refetch: query.refetch,
+  };
 }
 
 export function useLocation(id: string) {

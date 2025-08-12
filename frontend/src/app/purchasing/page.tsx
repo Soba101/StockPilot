@@ -5,13 +5,27 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ArrowLeft, Plus, ShoppingCart } from 'lucide-react'
-
-const mockPOs = [
-  { id: 'PO-1001', sku: 'WIDGET-001', product: 'Blue Widget', qty: 50, supplier: 'Acme Supply', status: 'Pending' },
-  { id: 'PO-1002', sku: 'GADGET-001', product: 'Super Gadget', qty: 25, supplier: 'Gizmo Corp', status: 'Ordered' },
-]
+import { usePurchaseOrders } from '@/hooks/use-purchasing'
 
 export default function PurchasingPage() {
+  const { purchaseOrders, loading, error, refetch } = usePurchaseOrders({ limit: 20 });
+
+  const formatStatus = (status: string) => {
+    return status.charAt(0).toUpperCase() + status.slice(1);
+  };
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+    }).format(amount);
+  };
+
+  const formatDate = (dateString?: string) => {
+    if (!dateString) return 'N/A';
+    return new Date(dateString).toLocaleDateString();
+  };
+
   return (
     <div className="container mx-auto px-4 py-8 space-y-8">
       <div className="flex items-center justify-between">
@@ -40,39 +54,64 @@ export default function PurchasingPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>PO #</TableHead>
-                <TableHead>Product</TableHead>
-                <TableHead>Qty</TableHead>
-                <TableHead>Supplier</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Action</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {mockPOs.map((po) => (
-                <TableRow key={po.id}>
-                  <TableCell className="font-medium">{po.id}</TableCell>
-                  <TableCell>
-                    <div>
-                      <div className="font-medium">{po.product}</div>
-                      <div className="text-sm text-muted-foreground">{po.sku}</div>
-                    </div>
-                  </TableCell>
-                  <TableCell>{po.qty}</TableCell>
-                  <TableCell>{po.supplier}</TableCell>
-                  <TableCell>{po.status}</TableCell>
-                  <TableCell>
-                    <Button size="sm" variant="outline" asChild>
-                      <Link href={`/purchasing/new?sku=${encodeURIComponent(po.sku)}`}>Reorder</Link>
-                    </Button>
-                  </TableCell>
+          {error && (
+            <div className="text-red-600 mb-4">
+              Error loading purchase orders: {error}
+            </div>
+          )}
+          
+          {loading ? (
+            <div className="text-center py-8">Loading purchase orders...</div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>PO #</TableHead>
+                  <TableHead>Supplier</TableHead>
+                  <TableHead>Items</TableHead>
+                  <TableHead>Total Amount</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Expected Date</TableHead>
+                  <TableHead>Action</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {purchaseOrders && purchaseOrders.length > 0 ? (
+                  purchaseOrders.map((po) => (
+                    <TableRow key={po.id}>
+                      <TableCell className="font-medium">{po.po_number}</TableCell>
+                      <TableCell>{po.supplier_name}</TableCell>
+                      <TableCell>{po.item_count} items</TableCell>
+                      <TableCell>{formatCurrency(po.total_amount)}</TableCell>
+                      <TableCell>
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          po.status === 'draft' ? 'bg-gray-100 text-gray-800' :
+                          po.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                          po.status === 'ordered' ? 'bg-blue-100 text-blue-800' :
+                          po.status === 'received' ? 'bg-green-100 text-green-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {formatStatus(po.status)}
+                        </span>
+                      </TableCell>
+                      <TableCell>{formatDate(po.expected_date)}</TableCell>
+                      <TableCell>
+                        <Button size="sm" variant="outline" asChild>
+                          <Link href={`/purchasing/${po.id}`}>View</Link>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                      No purchase orders found. Create your first purchase order to get started.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 

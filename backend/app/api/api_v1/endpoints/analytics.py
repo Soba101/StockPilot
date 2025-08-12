@@ -100,7 +100,7 @@ def get_analytics(
         func.sum(OrderItem.quantity * OrderItem.unit_price).label('total_revenue'),
         Product.cost,
         Product.price
-    ).join(OrderItem).join(Order).filter(
+    ).select_from(Product).join(OrderItem, Product.id == OrderItem.product_id).join(Order, OrderItem.order_id == Order.id).filter(
         Order.org_id == org_id,
         Order.status == 'fulfilled'
     ).group_by(Product.id, Product.name, Product.sku, Product.cost, Product.price).order_by(
@@ -126,7 +126,7 @@ def get_analytics(
     category_sales = db.query(
         Product.category,
         func.sum(OrderItem.quantity * OrderItem.unit_price).label('revenue')
-    ).join(OrderItem).join(Order).filter(
+    ).select_from(Product).join(OrderItem, Product.id == OrderItem.product_id).join(Order, OrderItem.order_id == Order.id).filter(
         Order.org_id == org_id,
         Order.status == 'fulfilled',
         Product.category.isnot(None)
@@ -154,7 +154,7 @@ def get_analytics(
         OrderItem.quantity,
         OrderItem.unit_price,
         Order.channel
-    ).join(OrderItem).join(Product).filter(
+    ).select_from(Order).join(OrderItem, Order.id == OrderItem.order_id).join(Product, OrderItem.product_id == Product.id).filter(
         Order.org_id == org_id,
         Order.status == 'fulfilled'
     ).order_by(desc(Order.ordered_at)).limit(10).all()

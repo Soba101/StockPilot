@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button'
 import { MessageCircle, ArrowLeft } from 'lucide-react'
 import { useState } from 'react'
 import { Input } from '@/components/ui/input'
+import { useInventory } from '@/hooks/use-inventory'
+import { useProducts } from '@/hooks/use-products'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -17,17 +19,92 @@ export default function ChatPage() {
     { role: 'assistant', content: 'Hi! Ask me about inventory, sales, or purchasing.' },
   ])
   const [input, setInput] = useState('')
+  const { summary: inventorySummary } = useInventory()
+  const { products } = useProducts()
+
+  const generateResponse = (userInput: string): string => {
+    const query = userInput.toLowerCase()
+    
+    if (!inventorySummary) {
+      return "I'm still loading inventory data. Please try again in a moment."
+    }
+
+    // Stock level queries
+    if (query.includes('stock') || query.includes('inventory')) {
+      const lowStockItems = inventorySummary.locations
+        ?.flatMap(loc => loc.products.filter(p => p.is_low_stock))
+        .slice(0, 3) || []
+      
+      if (lowStockItems.length > 0) {
+        const itemNames = lowStockItems.map(item => item.product_name).join(', ')
+        return `📦 Current inventory status: ${inventorySummary.total_products} products across ${inventorySummary.total_locations} locations. Low stock alert: ${itemNames} need restocking.`
+      } else {
+        return `📦 Current inventory status: ${inventorySummary.total_products} products across ${inventorySummary.total_locations} locations. All stock levels look good!`
+      }
+    }
+
+    // Low stock queries
+    if (query.includes('low stock') || query.includes('reorder')) {
+      if (inventorySummary.low_stock_count > 0) {
+        const lowStockItems = inventorySummary.locations
+          ?.flatMap(loc => loc.products.filter(p => p.is_low_stock))
+          .slice(0, 5) || []
+        const itemList = lowStockItems.map(item => 
+          `${item.product_name} (${item.available_quantity} remaining)`
+        ).join(', ')
+        return `⚠️ ${inventorySummary.low_stock_count} items need restocking: ${itemList}`
+      } else {
+        return `✅ All products are well-stocked! No reorder alerts at this time.`
+      }
+    }
+
+    // Value queries
+    if (query.includes('value') || query.includes('worth')) {
+      const totalValue = inventorySummary.total_stock_value
+      return `💰 Total inventory value: $${totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    }
+
+    // Product count queries
+    if (query.includes('products') || query.includes('items')) {
+      const categories = new Set(products?.map(p => p.category).filter(Boolean) || [])
+      return `📊 You have ${inventorySummary.total_products} products across ${categories.size} categories in your inventory.`
+    }
+
+    // Location queries
+    if (query.includes('location') || query.includes('warehouse')) {
+      const locationSummary = inventorySummary.locations?.map(loc => 
+        `${loc.location_name}: ${loc.total_products} products`
+      ).join(', ') || ''
+      return `🏢 Inventory locations: ${locationSummary}`
+    }
+
+    // Default response with general insights
+    const insights = []
+    if (inventorySummary.low_stock_count > 0) {
+      insights.push(`${inventorySummary.low_stock_count} items need restocking`)
+    }
+    if (inventorySummary.out_of_stock_count > 0) {
+      insights.push(`${inventorySummary.out_of_stock_count} items are out of stock`)
+    }
+    if (insights.length === 0) {
+      insights.push('All inventory levels look healthy')
+    }
+
+    return `I can help with inventory questions! Current status: ${insights.join(', ')}. Try asking about "low stock", "inventory value", or "product count".`
+  }
 
   const send = async () => {
     if (!input.trim()) return
     const userMsg: Message = { role: 'user', content: input.trim() }
     setMessages((m) => [...m, userMsg])
     setInput('')
-    // Demo assistant response
+    
+    // Generate response based on real inventory data
     setTimeout(() => {
+      const response = generateResponse(userMsg.content)
       setMessages((m) => [
         ...m,
-        { role: 'assistant', content: `You said: "${userMsg.content}". Insight: Blue Widget is trending.` },
+        { role: 'assistant', content: response },
       ])
     }, 400)
   }

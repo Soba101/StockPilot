@@ -113,6 +113,36 @@ CREATE TABLE order_items (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Purchase orders table
+CREATE TABLE purchase_orders (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    supplier_id UUID NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+    po_number VARCHAR(50) NOT NULL UNIQUE,
+    status VARCHAR(20) DEFAULT 'draft',
+    order_date TIMESTAMP WITH TIME ZONE,
+    expected_date TIMESTAMP WITH TIME ZONE,
+    received_date TIMESTAMP WITH TIME ZONE,
+    total_amount DECIMAL(10,2) DEFAULT 0.0,
+    notes TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    created_by UUID
+);
+
+-- Purchase order items table
+CREATE TABLE purchase_order_items (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    purchase_order_id UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    quantity INTEGER NOT NULL,
+    unit_cost DECIMAL(10,2) NOT NULL,
+    total_cost DECIMAL(10,2) NOT NULL,
+    received_quantity INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Indexes for performance
 CREATE INDEX idx_products_org_sku ON products(org_id, sku);
 CREATE INDEX idx_inventory_movements_product ON inventory_movements(product_id);
@@ -121,6 +151,9 @@ CREATE INDEX idx_inventory_movements_timestamp ON inventory_movements(timestamp)
 CREATE INDEX idx_orders_org ON orders(org_id);
 CREATE INDEX idx_orders_status ON orders(status);
 CREATE INDEX idx_order_items_order ON order_items(order_id);
+CREATE INDEX idx_purchase_orders_org ON purchase_orders(org_id);
+CREATE INDEX idx_purchase_orders_supplier ON purchase_orders(supplier_id);
+CREATE INDEX idx_purchase_order_items_po ON purchase_order_items(purchase_order_id);
 
 -- Insert sample organization for development
 INSERT INTO organizations (name) VALUES ('Demo Company');
@@ -143,6 +176,12 @@ BEGIN
     (demo_org_id, 'WIDGET-001', 'Blue Widget', 'Widgets', 5.00, 15.00, 10),
     (demo_org_id, 'WIDGET-002', 'Red Widget', 'Widgets', 5.50, 16.00, 8),
     (demo_org_id, 'GADGET-001', 'Super Gadget', 'Gadgets', 25.00, 75.00, 5);
+    
+    -- Insert sample suppliers
+    INSERT INTO suppliers (org_id, name, contact_email, contact_phone, lead_time_days, minimum_order_quantity) VALUES
+    (demo_org_id, 'Acme Supply Co', 'orders@acmesupply.com', '555-0123', 7, 10),
+    (demo_org_id, 'Gizmo Corp', 'purchasing@gizmocorp.com', '555-0456', 14, 5),
+    (demo_org_id, 'Widget Works', 'sales@widgetworks.com', '555-0789', 10, 25);
     
     -- Insert demo admin user with properly hashed password
     -- Password: admin123 (hashed with bcrypt)

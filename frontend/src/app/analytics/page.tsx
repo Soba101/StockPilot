@@ -43,9 +43,9 @@ export default function AnalyticsPage() {
 
   // Apply channel filter to recent sales
   const filteredRecentSales = useMemo(() => {
-    if (!analytics?.recentSales) return []
-    return analytics.recentSales.filter((s) => selectedChannels.includes(s.channel))
-  }, [analytics?.recentSales, selectedChannels])
+    if (!analytics?.recent_sales) return []
+    return analytics.recent_sales.filter((s) => selectedChannels.includes(s.channel))
+  }, [analytics?.recent_sales, selectedChannels])
 
   if (loading) {
     return (
@@ -135,10 +135,10 @@ export default function AnalyticsPage() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${analytics.salesMetrics.totalRevenue.toLocaleString()}</div>
+            <div className="text-2xl font-bold">${analytics.sales_metrics.total_revenue.toLocaleString()}</div>
             <p className="text-xs text-green-600 flex items-center">
               <TrendingUp className="h-3 w-3 mr-1" />
-              +{analytics.salesMetrics.revenueGrowth}% from last month
+              +{analytics.sales_metrics.revenue_growth}% from last month
             </p>
           </CardContent>
         </Card>
@@ -149,10 +149,10 @@ export default function AnalyticsPage() {
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{analytics.salesMetrics.totalUnits.toLocaleString()}</div>
+            <div className="text-2xl font-bold">{analytics.sales_metrics.total_units.toLocaleString()}</div>
             <p className="text-xs text-red-600 flex items-center">
               <TrendingDown className="h-3 w-3 mr-1" />
-              {analytics.salesMetrics.unitsGrowth}% from last month
+              {analytics.sales_metrics.units_growth}% from last month
             </p>
           </CardContent>
         </Card>
@@ -163,9 +163,9 @@ export default function AnalyticsPage() {
             <BarChart3 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${analytics.salesMetrics.avgOrderValue.toFixed(2)}</div>
+            <div className="text-2xl font-bold">${analytics.sales_metrics.avg_order_value.toFixed(2)}</div>
             <p className="text-xs text-muted-foreground">
-              Across {analytics.salesMetrics.totalOrders} orders
+              Across {analytics.sales_metrics.total_orders} orders
             </p>
           </CardContent>
         </Card>
@@ -176,7 +176,7 @@ export default function AnalyticsPage() {
             <PieChart className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{analytics.salesMetrics.totalOrders.toLocaleString()}</div>
+            <div className="text-2xl font-bold">{analytics.sales_metrics.total_orders.toLocaleString()}</div>
             <p className="text-xs text-muted-foreground">
               This period
             </p>
@@ -204,7 +204,7 @@ export default function AnalyticsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {analytics.topProducts.map((product, index) => (
+                {analytics.top_products.map((product, index) => (
                   <TableRow key={index}>
                     <TableCell>
                       <div>
@@ -234,7 +234,7 @@ export default function AnalyticsPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {analytics.categoryData.map((category, index) => (
+              {analytics.category_data.map((category, index) => (
                 <div key={index} className="space-y-2">
                   <div className="flex justify-between items-center">
                     <span className="font-medium">{category.category}</span>
@@ -319,7 +319,7 @@ export default function AnalyticsPage() {
         <CardContent>
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={analytics.revenueTrend} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
+              <LineChart data={analytics.revenue_trend} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" className="text-muted" />
                 <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                 <YAxis tickFormatter={(v) => `$${v.toLocaleString()}`} width={70} tick={{ fontSize: 12 }} />
