@@ -75,7 +75,7 @@ def handler_top_skus_by_margin(params: Dict[str, Any], db: Session, org_id: str)
     mart_sql = text("""
         SELECT product_name, sku, sum(gross_margin) AS gross_margin, sum(gross_revenue) AS revenue, sum(units_sold) AS units
         FROM analytics_marts.sales_daily
-        WHERE org_id = :org_id AND sales_date >= (current_date - (:days::int))
+        WHERE org_id = :org_id AND sales_date >= current_date - make_interval(days => :days)
         GROUP BY product_name, sku
         ORDER BY gross_margin DESC
         LIMIT :limit
@@ -94,7 +94,7 @@ def handler_top_skus_by_margin(params: Dict[str, Any], db: Session, org_id: str)
             FROM order_items oi
             JOIN orders o ON o.id = oi.order_id
             JOIN products p ON p.id = oi.product_id
-            WHERE p.org_id = :org_id AND o.ordered_at >= (current_date - (:days::int))
+            WHERE p.org_id = :org_id AND o.ordered_at >= current_date - make_interval(days => :days)
             GROUP BY p.name, p.sku
             ORDER BY gross_margin DESC
             LIMIT :limit
@@ -249,7 +249,7 @@ def handler_slow_movers(params: Dict[str, Any], db: Session, org_id: str) -> Dic
             SELECT p.id, p.name as product_name, p.sku,
                    COALESCE(SUM(CASE WHEN im.movement_type IN ('in','adjust') THEN im.quantity 
                         WHEN im.movement_type='out' THEN -im.quantity ELSE 0 END),0) as on_hand,
-                   COALESCE(SUM(CASE WHEN sd.sales_date >= (current_date - :days::int) THEN sd.units_sold ELSE 0 END),0) as units_sold_period
+                   COALESCE(SUM(CASE WHEN sd.sales_date >= current_date - make_interval(days => :days) THEN sd.units_sold ELSE 0 END),0) as units_sold_period
             FROM products p
             LEFT JOIN inventory_movements im ON im.product_id = p.id
             LEFT JOIN analytics_marts.sales_daily sd ON sd.sku = p.sku AND sd.org_id = p.org_id
