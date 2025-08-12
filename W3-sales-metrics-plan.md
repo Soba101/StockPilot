@@ -53,16 +53,24 @@ W3 focuses on completing the core foundation while building advanced sales analy
 - ✅ PO creation workflow ready (needs UI form completion)
 - ✅ PO status management working
 
-### 1.3 Fix Chat Page Mock Responses 🔲 MEDIUM PRIORITY
-**Current Issue**: Chat page shows hardcoded demo responses instead of inventory insights
+### 1.3 Fix Chat Page Mock Responses ✅ CORE COMPLETE (Enhancements Pending)
 
-**Frontend Tasks:**
-- 🔲 **Update chat responses** (`/frontend/src/app/chat/page.tsx`)
-  - Replace: `Insight: Blue Widget is trending` (hardcoded)
-  - With: Real inventory insights (low stock alerts, recent movements)
-  - Add: Basic inventory query responses (stock levels, reorder alerts)
-- 🔲 **Connect to existing APIs** - Use inventory summary and movements APIs
-- 🔲 **Add basic query parsing** - Simple keyword matching for inventory questions
+**Status**: Core functionality implemented using real inventory & product data.
+
+**Implemented (in `frontend/src/app/chat/page.tsx`):**
+
+- ✅ Dynamic responses powered by `useInventory` + `useProducts` hooks (no hardcoded demo line)
+- ✅ Keyword intent parsing for: stock/inventory status, low stock / reorder alerts, inventory value, product & category counts, locations
+- ✅ Low/out-of-stock item summarization (top items surfaced)
+- ✅ Context-aware fallback message built from real counts
+
+**Enhancements Still Open (optional next iteration):**
+
+- 🔲 Incorporate sales velocity & trending (pull from `/api/v1/analytics/sales`)
+- 🔲 Natural language / fuzzy matching (beyond simple keyword includes)
+- 🔲 Conversation memory / multi-turn context
+- 🔲 Suggest purchase order creation for low-stock items
+- 🔲 Add channel performance insights when user asks about "channels" / "sales mix"
 
 ### 1.4 Test Core CRUD Operations ✅ **COMPLETED**
 **Goal**: Ensure all basic inventory operations work flawlessly
@@ -120,38 +128,59 @@ W3 focuses on completing the core foundation while building advanced sales analy
   - Falls back gracefully to original data if mart unavailable
   - Improved revenue trend calculation using daily aggregates
 
-### 2.2 "Week in Review" Report 🔲 MEDIUM PRIORITY
+### 2.2 "Week in Review" Report ✅ **COMPLETED**
 **Goal**: Automated weekly summary report as specified in original W3 plan
 
-**Backend:**
-- 🔲 **Create report generation endpoint** (`/api/v1/reports/week-in-review`)
-  - Parameter: start_date (defaults to last week)
-  - Returns: sales summary, top products, inventory changes, alerts
-- 🔲 **Create report templates** for consistent formatting
-- 🔲 **Add export functionality** (PDF/CSV generation)
+**✅ Backend Complete:**
+- ✅ **Created report generation endpoint** (`/api/v1/reports/week-in-review`)
+  - Flexible date parameters (defaults to last Monday-Sunday)
+  - Comprehensive weekly metrics using sales_daily mart
+  - Sales summary, top products, inventory alerts, channel insights
+  - Key insights and AI-generated recommendations
+  - Performance scoring and health indicators
+- ✅ **Created report templates** with consistent formatting and structured data models
+- ✅ **Added export functionality** (CSV/JSON generation with file downloads)
+  - `/reports/week-in-review/export/csv` - Structured CSV format
+  - `/reports/week-in-review/export/json` - Full JSON export
+  - Historical reports endpoint for tracking
 
-**Frontend:**
-- 🔲 **Create reports page** (`/frontend/src/app/reports/page.tsx`)
-  - Week in Review generator
-  - Historical reports list
-  - Export/download functionality
-- 🔲 **Add reports navigation** to main navbar
-- 🔲 **Create report components** - Reusable chart and table components
+**✅ Frontend Complete:**
+- ✅ **Created reports page** (`/frontend/src/app/reports/page.tsx`)
+  - Interactive Week in Review generator with date picker
+  - Tabbed interface: Insights, Top Products, Inventory Alerts, Channels
+  - Performance dashboard with health indicators
+  - Export buttons for CSV/JSON downloads
+  - Real-time report generation
+- ✅ **Added reports navigation** to main navbar between Purchasing and Chat
+- ✅ **Created comprehensive report components** - Performance cards, trend indicators, alert badges
 
-### 2.3 Advanced KPI Dashboard Enhancements 🔲 MEDIUM PRIORITY
-**Current**: Basic KPIs working. Need to enhance with W3 features.
+### 2.3 Advanced KPI Dashboard Enhancements 🔄 IN PROGRESS
 
-**Enhanced Metrics:**
-- 🔲 **Add velocity calculations** - 8-week moving average sales per product
-- 🔲 **Add days-to-stockout** - Forecast when items will run out
-- 🔲 **Add margin analysis** - Gross margin trends by product/category
-- 🔲 **Add channel performance** - Revenue by sales channel
+**Data & API Layer Progress:**
 
-**Dashboard Improvements:**
-- 🔲 **Add time period selectors** - 7/30/90 day views
-- 🔲 **Add drill-down capability** - Click KPIs to see details
-- 🔲 **Add real-time refresh** - Auto-refresh every 5 minutes
-- 🔲 **Add export functionality** - Download dashboard as PDF
+- ✅ Velocity foundations: `sales_daily` mart + `/api/v1/analytics/sales` expose `units_7day_avg` & `units_30day_avg` (supports moving average / velocity KPIs)
+- ✅ Margin analysis: `gross_margin` & `margin_percent` aggregated and surfaced in analytics & Week in Review report
+- ✅ Channel performance: `channel_performance` block in `/analytics/sales` and channel insights in Week in Review (with market share)
+- ✅ Trending analysis: Growth vs decline detection using 7-day vs 30-day ratio (`trending_analysis`)
+- ✅ Days-to-stockout: Implemented via new endpoint `/api/v1/analytics/stockout-risk` (derives days_to_stockout from rolling velocity averages)
+
+**UI / Dashboard Layer Progress:**
+
+- ✅ Velocity & margin KPIs surfaced (median 7d velocity, avg margin % cards)
+- ✅ Days-to-stockout / stockout risk table (top 10 with CSV export)
+- ✅ Channel performance table (revenue, units, orders, AOV, margin)
+- ✅ Consolidated JSON + summary CSV export (analytics + channel + stockout risk)
+- ✅ Manual refresh & auto-refresh (5m) in hooks
+- 🔲 Drill-down modals (product/channel deep dive) – pending
+- 🔲 PDF / full visual snapshot export – pending
+
+**Recommended Next Implementation Steps:**
+
+1. Implement drill-down modal(s) for product & channel detail (link from KPIs/tables)
+2. Add optional sparkline trends for top velocity products (7d vs 30d)
+3. Provide PDF export (server wkhtmltopdf or client canvas approach)
+4. Add combined channel share visualization (pie / stacked bar)
+5. (Optional) Add anomaly detection badge (sudden spike/drop) on revenue trend
 
 ---
 
@@ -189,20 +218,23 @@ W3 focuses on completing the core foundation while building advanced sales analy
 
 ## Success Criteria
 
-### Phase 1 Complete When:
+### Phase 1 Complete When
 - ✅ All pages load without errors
 - ✅ All CRUD operations work (create, edit, delete products)
 - ✅ Inventory movements function (adjustments, transfers)
 - ✅ Purchasing page shows real data (no mock data)
 - ✅ Authentication flows work seamlessly
 
-### Phase 2 Complete When:
+### Phase 2 Complete When
+
 - ✅ dbt sales daily mart runs successfully
 - ✅ "Week in Review" report generates correctly
-- ✅ Advanced KPIs display (velocity, days-to-stockout)
-- ✅ All reports export properly (PDF/CSV)
+- ✅ Advanced KPIs surfaced (velocity, margin %, channel performance, trending)
+- ✅ Days-to-stockout metric implemented & displayed (stockout risk table)
+- 🔲 PDF export of dashboard (CSV/JSON exports done)
+- ✅ CSV / JSON exports operational
 
-### Phase 3 Complete When:
+### Phase 3 Complete When
 - ✅ System performs well with sample large data
 - ✅ All dbt tests pass
 - ✅ External integration schema ready
@@ -212,10 +244,10 @@ W3 focuses on completing the core foundation while building advanced sales analy
 
 ## Technical Implementation Notes
 
-### Key Files to Create/Modify:
+### Key Files to Create/Modify
 
 **Backend:**
-```
+```text
 /app/api/api_v1/endpoints/purchasing.py    # New PO endpoints
 /app/schemas/purchasing.py                 # PO schemas  
 /backend/dbt/models/marts/sales_daily.sql  # Sales mart
@@ -223,20 +255,22 @@ W3 focuses on completing the core foundation while building advanced sales analy
 ```
 
 **Frontend:**
-```
+```text
 /frontend/src/hooks/use-purchasing.ts      # PO data hook
 /frontend/src/app/purchasing/page.tsx      # Fix mock data
 /frontend/src/app/reports/page.tsx         # New reports page
 /frontend/src/hooks/use-locations.ts       # Fix if needed
 ```
 
-### Testing Strategy:
+### Testing Strategy
+
 1. **Manual Testing**: Each CRUD operation and page load
 2. **API Testing**: All endpoints with curl/Postman  
 3. **Data Quality**: dbt test runs and validation
 4. **Performance**: Dashboard load times and responsiveness
 
-### Estimated Timeline:
+### Estimated Timeline
+
 - **Phase 1**: 15-20 minutes (critical path)
 - **Phase 2**: 45-60 minutes (core W3 features)
 - **Phase 3**: 30-45 minutes (polish and prep)

@@ -89,6 +89,18 @@ class SalesAnalyticsResponse(BaseModel):
     trending_analysis: dict
 
 
+class StockoutRisk(BaseModel):
+    product_id: str
+    product_name: str
+    sku: str
+    on_hand: float
+    reorder_point: Optional[int]
+    velocity_7d: Optional[float]
+    velocity_30d: Optional[float]
+    days_to_stockout: Optional[float]
+    risk_level: str  # none|low|medium|high
+
+
 @router.get("/analytics", response_model=AnalyticsResponse)
 def get_analytics(
     days: int = Query(30, ge=1, le=90, description="Number of days to analyze"),
@@ -503,3 +515,104 @@ def get_sales_analytics(
         top_performing_products=top_performing_products,
         trending_analysis=trending_analysis
     )
+
+
+@router.get("/stockout-risk", response_model=List[StockoutRisk])
+def get_stockout_risk(
+    days: int = Query(30, ge=7, le=120, description="Lookback window for velocity context"),
+    db: Session = Depends(get_db),
+    claims = Depends(get_current_claims),
+):
+    """Return per-product stockout risk metrics combining current stock & sales velocity.
+
+    days_to_stockout = on_hand / max(velocity_7d, velocity_30d, epsilon)
+    Velocity source: sales_daily mart rolling averages (already precomputed).
+    Risk bands (only if velocity > 0):
+      <=7 days => high, <=14 => medium, <=30 => low, else none.
+    """
+
+    org_id = claims.get("org")
+
+    # Current on hand per product
+    stock_sql = text("""
+        SELECT p.id as product_id, p.name as product_name, p.sku, p.reorder_point,
+               COALESCE(SUM(CASE 
+                 WHEN im.movement_type IN ('in','adjust') THEN im.quantity
+                 WHEN im.movement_type = 'out' THEN -im.quantity
+                 WHEN im.movement_type = 'transfer' THEN 0
+                 ELSE 0 END), 0) as on_hand
+        FROM products p
+        LEFT JOIN inventory_movements im ON im.product_id = p.id
+        WHERE p.org_id = :org_id
+        GROUP BY p.id, p.name, p.sku, p.reorder_point
+    """)
+
+    stock_rows = db.execute(stock_sql, {"org_id": org_id}).fetchall()
+    stock_map = {str(r.product_id): r for r in stock_rows}
+
+    # Velocity (average of rolling averages over window)
+    velocity_sql = text("""
+        SELECT sd.sku, 
+               AVG(sd.units_7day_avg) as v7,
+               AVG(sd.units_30day_avg) as v30
+        FROM analytics_marts.sales_daily sd
+        WHERE sd.org_id = :org_id
+          AND sd.sales_date >= :start_date
+        GROUP BY sd.sku
+    """)
+    start_date = (datetime.now().date() - timedelta(days=days))
+    vel_rows = db.execute(velocity_sql, {"org_id": org_id, "start_date": start_date}).fetchall()
+    velocity_map = {r.sku: r for r in vel_rows}
+
+    results: List[StockoutRisk] = []
+    epsilon = 1e-6
+    for pid, row in stock_map.items():
+        vel_row = velocity_map.get(row.sku)
+        v7 = float(vel_row.v7) if vel_row and vel_row.v7 is not None else None
+        v30 = float(vel_row.v30) if vel_row and vel_row.v30 is not None else None
+        # Choose velocity priority: v7 if >0 else v30 if >0 else None
+        chosen_velocity = None
+        if v7 and v7 > 0:
+            chosen_velocity = v7
+        elif v30 and v30 > 0:
+            chosen_velocity = v30
+
+        days_to_stockout = None
+        if chosen_velocity and chosen_velocity > 0:
+            days_to_stockout = float(row.on_hand) / max(chosen_velocity, epsilon)
+
+        # Determine risk level
+        risk_level = "none"
+        if days_to_stockout is not None:
+            if days_to_stockout <= 7:
+                risk_level = "high"
+            elif days_to_stockout <= 14:
+                risk_level = "medium"
+            elif days_to_stockout <= 30:
+                risk_level = "low"
+
+        # Elevate risk if below reorder point regardless of velocity
+        if row.reorder_point is not None and float(row.on_hand) <= float(row.reorder_point or 0):
+            # Only upgrade risk if not already high
+            if risk_level in ("none", "low"):
+                risk_level = "medium" if risk_level == "none" else risk_level
+
+        results.append(StockoutRisk(
+            product_id=pid,
+            product_name=row.product_name,
+            sku=row.sku,
+            on_hand=float(row.on_hand),
+            reorder_point=int(row.reorder_point) if row.reorder_point is not None else None,
+            velocity_7d=v7,
+            velocity_30d=v30,
+            days_to_stockout=round(days_to_stockout, 1) if days_to_stockout is not None else None,
+            risk_level=risk_level
+        ))
+
+    # Sort by highest risk then shortest days_to_stockout
+    def sort_key(r: StockoutRisk):
+        risk_rank = {"high": 0, "medium": 1, "low": 2, "none": 3}.get(r.risk_level, 4)
+        return (risk_rank, r.days_to_stockout if r.days_to_stockout is not None else 9999)
+
+    results.sort(key=sort_key)
+    return results

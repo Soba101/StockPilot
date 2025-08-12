@@ -25,6 +25,8 @@ import {
   Area,
 } from 'recharts'
 import { useAnalytics } from '@/hooks/use-analytics'
+import { useSalesAnalytics } from '@/hooks/use-sales-analytics'
+import { useStockoutRisk } from '@/hooks/use-stockout-risk'
 
 export default function AnalyticsPage() {
   // UI state: date range & filters
@@ -34,6 +36,8 @@ export default function AnalyticsPage() {
 
   // Fetch real analytics data
   const { data: analytics, loading, error, refetch } = useAnalytics(rangeDays)
+  const { data: salesAnalytics } = useSalesAnalytics(rangeDays)
+  const { data: stockoutRisk } = useStockoutRisk(rangeDays)
 
   const toggleChannel = (ch: string) => {
     setSelectedChannels((prev) =>
@@ -127,8 +131,8 @@ export default function AnalyticsPage() {
         </Card>
       )}
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+  {/* KPI Cards */}
+  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
@@ -182,7 +186,194 @@ export default function AnalyticsPage() {
             </p>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Avg Margin %</CardTitle>
+            <BarChart3 className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{(salesAnalytics?.period_summary?.avg_margin_percent ?? 0).toFixed(1)}%</div>
+            <p className="text-xs text-muted-foreground">Gross margin for period</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Velocity (Median)</CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{(() => {
+              if (!salesAnalytics?.daily_sales?.length) return '—'
+              const vals = salesAnalytics.daily_sales.map(r => r.units_7day_avg).filter(v => v > 0).sort((a,b)=>a-b)
+              if (!vals.length) return '—'
+              const mid = Math.floor(vals.length / 2)
+              const median = vals.length % 2 ? vals[mid] : (vals[mid-1]+vals[mid])/2
+              return median.toFixed(1)
+            })()}</div>
+            <p className="text-xs text-muted-foreground">Median 7d avg units</p>
+          </CardContent>
+        </Card>
       </div>
+
+      {/* Stockout Risk (Days to Stockout) */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Stockout Risk</CardTitle>
+          <CardDescription>
+            Prioritized by risk & estimated days to stockout (range {rangeDays}d velocity)
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Product</TableHead>
+                  <TableHead className="text-right">On Hand</TableHead>
+                  <TableHead className="text-right">7d Avg</TableHead>
+                  <TableHead className="text-right">30d Avg</TableHead>
+                  <TableHead className="text-right">Days to Stockout</TableHead>
+                  <TableHead className="text-right">Risk</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {stockoutRisk?.slice(0, 10).map(r => (
+                  <TableRow key={r.product_id}>
+                    <TableCell>
+                      <div className="font-medium">{r.product_name}</div>
+                      <div className="text-xs text-muted-foreground">{r.sku}</div>
+                    </TableCell>
+                    <TableCell className="text-right">{r.on_hand}</TableCell>
+                    <TableCell className="text-right">{r.velocity_7d?.toFixed(1) ?? '—'}</TableCell>
+                    <TableCell className="text-right">{r.velocity_30d?.toFixed(1) ?? '—'}</TableCell>
+                    <TableCell className="text-right">{r.days_to_stockout?.toFixed(1) ?? '—'}</TableCell>
+                    <TableCell className="text-right">
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium capitalize ${
+                        r.risk_level === 'high' ? 'bg-red-100 text-red-700' :
+                        r.risk_level === 'medium' ? 'bg-amber-100 text-amber-700' :
+                        r.risk_level === 'low' ? 'bg-yellow-50 text-yellow-700' :
+                        'bg-green-50 text-green-700'
+                      }`}>{r.risk_level}</span>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {(!stockoutRisk || stockoutRisk.length === 0) && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">No risk data</TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          {stockoutRisk?.length ? (
+            <div className="mt-4 flex justify-end">
+              <Button size="sm" variant="outline" onClick={() => {
+                const csv = ['product,sku,on_hand,velocity_7d,velocity_30d,days_to_stockout,risk_level']
+                stockoutRisk.forEach(r => {
+                  csv.push([
+                    JSON.stringify(r.product_name),
+                    r.sku,
+                    r.on_hand,
+                    r.velocity_7d ?? '',
+                    r.velocity_30d ?? '',
+                    r.days_to_stockout ?? '',
+                    r.risk_level
+                  ].join(','))
+                })
+                const blob = new Blob([csv.join('\n')], { type: 'text/csv;charset=utf-8;' })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `stockout-risk-${rangeDays}d.csv`
+                a.click()
+                URL.revokeObjectURL(url)
+              }}>Export CSV</Button>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      {/* Channel Performance */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Channel Performance</CardTitle>
+          <CardDescription>Revenue & margin by sales channel</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Channel</TableHead>
+                <TableHead className="text-right">Revenue</TableHead>
+                <TableHead className="text-right">Units</TableHead>
+                <TableHead className="text-right">Orders</TableHead>
+                <TableHead className="text-right">Avg Order</TableHead>
+                <TableHead className="text-right">Margin %</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {salesAnalytics?.channel_performance?.map(ch => (
+                <TableRow key={ch.channel}>
+                  <TableCell>{ch.channel || 'Unknown'}</TableCell>
+                  <TableCell className="text-right">${ch.total_revenue.toLocaleString()}</TableCell>
+                  <TableCell className="text-right">{ch.total_units}</TableCell>
+                  <TableCell className="text-right">{ch.orders_count}</TableCell>
+                  <TableCell className="text-right">${ch.avg_order_value.toFixed(2)}</TableCell>
+                  <TableCell className="text-right">{ch.margin_percent.toFixed(1)}%</TableCell>
+                </TableRow>
+              ))}
+              {(!salesAnalytics?.channel_performance || salesAnalytics.channel_performance.length===0) && (
+                <TableRow><TableCell colSpan={6} className="text-center text-sm text-muted-foreground">No channel data</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {/* Data Export */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Export & Drill-down</CardTitle>
+          <CardDescription>Download consolidated analytics datasets</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={() => {
+              const datasets: Record<string, any[]> = {
+                revenue_trend: analytics.revenue_trend || [],
+                top_products: analytics.top_products || [],
+                category_data: analytics.category_data || [],
+                channel_performance: salesAnalytics?.channel_performance || [],
+                stockout_risk: stockoutRisk || []
+              }
+              const blob = new Blob([JSON.stringify({ rangeDays, exported_at: new Date().toISOString(), datasets }, null, 2)], { type: 'application/json' })
+              const url = URL.createObjectURL(blob)
+              const a = document.createElement('a')
+              a.href = url
+              a.download = `analytics-export-${rangeDays}d.json`
+              a.click()
+              URL.revokeObjectURL(url)
+            }}>Export JSON</Button>
+            <Button size="sm" variant="outline" onClick={() => {
+              const csvLines: string[] = []
+              csvLines.push('dataset,type,a,b,c,d,e,f,g')
+              analytics.top_products.forEach(p=>csvLines.push(`top_product,${p.sku},${p.name},${p.units},${p.revenue},${p.margin}`))
+              salesAnalytics?.channel_performance?.forEach(ch=>csvLines.push(`channel,${ch.channel},${ch.total_revenue},${ch.total_units},${ch.orders_count},${ch.avg_order_value},${ch.margin_percent}`))
+              stockoutRisk?.forEach(r=>csvLines.push(`stockout,${r.sku},${r.product_name},${r.on_hand},${r.velocity_7d},${r.velocity_30d},${r.days_to_stockout},${r.risk_level}`))
+              const blob = new Blob([csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' })
+              const url = URL.createObjectURL(blob)
+              const a = document.createElement('a')
+              a.href = url
+              a.download = `analytics-export-${rangeDays}d.csv`
+              a.click()
+              URL.revokeObjectURL(url)
+            }}>Export CSV (Summary)</Button>
+            <Button size="sm" onClick={()=>refetch()}>Refresh Now</Button>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Top Products */}
