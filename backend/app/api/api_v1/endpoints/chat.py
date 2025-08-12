@@ -104,7 +104,8 @@ async def chat_query(req: ChatQueryRequest, db: Session = Depends(get_db), claim
         'stockout_risk': 'Stockout Risk Analysis',
         'week_in_review': 'Week in Review',
     'reorder_suggestions': 'Reorder Suggestions',
-    'slow_movers': 'Slow Moving Inventory'
+    'slow_movers': 'Slow Moving Inventory',
+    'product_detail': 'Product Detail'
     }
     
     # Enhanced summary with business context awareness
@@ -208,6 +209,11 @@ def _summarize_with_context(intent: IntentName, payload: dict, db: Session, org_
         if urgent_count > 0:
             return f"{base_summary} {urgent_count} items need large reorder quantities (>50 units) - consider bulk purchasing."
         return f"{base_summary} Regular restocking levels suggested."
+    elif intent == 'product_detail':
+        r = rows[0]
+        return (f"Product {r.get('product_name')} (SKU {r.get('sku')}) has on-hand {r.get('on_hand')} units. "
+                f"Sold {r.get('units_sold_7d')} units in last 7d and {r.get('units_sold_30d')} in last 30d. "
+                f"30d revenue ${r.get('revenue_30d'):.2f} margin ${r.get('margin_30d'):.2f}.")
     
     return base_summary
 

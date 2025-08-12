@@ -94,20 +94,15 @@ export default function ChatPage() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold">Chat Assistant</h1>
+        <h1 className="text-3xl font-bold">StockPilot Assistant</h1>
         <p className="text-muted-foreground">Ask questions about inventory and sales</p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <MessageCircle className="h-5 w-5" />
-            Assistant
-          </CardTitle>
-          <CardDescription>Lightweight demo chat</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="h-72 overflow-y-auto border rounded-md p-3 mb-4 bg-muted/30">
+          <div className="h-[520px] md:h-[620px] overflow-y-auto border rounded-md p-3 mb-4 bg-muted/30">
             <div className="space-y-3">
               {messages.map((m, i) => (
                 <div key={i} className={`${m.role === 'user' ? 'text-right' : 'text-left'}`}>

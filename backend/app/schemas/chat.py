@@ -26,7 +26,11 @@ class SlowMoversParams(BaseModel):
     period: PeriodEnum = '30d'
     n: int = Field(10, ge=1, le=50)
 
-IntentName = Literal['top_skus_by_margin','stockout_risk','week_in_review','reorder_suggestions','slow_movers']
+class ProductDetailParams(BaseModel):
+    sku: Optional[str] = None
+    name: Optional[str] = None
+
+IntentName = Literal['top_skus_by_margin','stockout_risk','week_in_review','reorder_suggestions','slow_movers','product_detail']
 
 # Chat request / response
 class ChatQueryRequest(BaseModel):
