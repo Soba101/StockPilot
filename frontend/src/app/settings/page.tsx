@@ -55,7 +55,7 @@ export default function SettingsPage() {
 
       <div className="mt-8">
         <Button variant="ghost" asChild>
-          <Link href="/">
+          <Link href="/dashboard">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Home
           </Link>

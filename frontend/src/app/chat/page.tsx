@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { useInventory } from '@/hooks/use-inventory'
 import { useProducts } from '@/hooks/use-products'
+import { useChatQuery } from '@/hooks/use-chat'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -16,81 +17,51 @@ interface Message {
 
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'assistant', content: 'Hi! Ask me about inventory, sales, or purchasing.' },
+    { role: 'assistant', content: 'Hi! Ask me about inventory, sales, purchasing, or type a question.' },
   ])
   const [input, setInput] = useState('')
   const { summary: inventorySummary } = useInventory()
   const { products } = useProducts()
+  const chat = useChatQuery()
 
-  const generateResponse = (userInput: string): string => {
-    const query = userInput.toLowerCase()
-    
-    if (!inventorySummary) {
-      return "I'm still loading inventory data. Please try again in a moment."
-    }
-
-    // Stock level queries
-    if (query.includes('stock') || query.includes('inventory')) {
-      const lowStockItems = inventorySummary.locations
-        ?.flatMap(loc => loc.products.filter(p => p.is_low_stock))
-        .slice(0, 3) || []
-      
-      if (lowStockItems.length > 0) {
-        const itemNames = lowStockItems.map(item => item.product_name).join(', ')
-        return `📦 Current inventory status: ${inventorySummary.total_products} products across ${inventorySummary.total_locations} locations. Low stock alert: ${itemNames} need restocking.`
-      } else {
-        return `📦 Current inventory status: ${inventorySummary.total_products} products across ${inventorySummary.total_locations} locations. All stock levels look good!`
+  const renderStructured = (m: Message) => {
+    try {
+      const marker = '__JSON__'
+      if (m.content.startsWith(marker)) {
+        const parsed = JSON.parse(m.content.slice(marker.length))
+        return (
+          <div className="space-y-2">
+            <div className="font-medium">{parsed.title}</div>
+            <div className="text-sm text-muted-foreground">{parsed.answer_summary}</div>
+            {parsed.data?.rows?.length > 0 && (
+              <div className="overflow-auto border rounded-md">
+                <table className="text-xs w-full">
+                  <thead className="bg-muted">
+                    <tr>
+                      {parsed.data.columns.map((c: any) => <th key={c.name} className="p-1 text-left font-medium">{c.name}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parsed.data.rows.slice(0,10).map((r: any, i: number) => (
+                      <tr key={i} className="odd:bg-muted/40">
+                        {parsed.data.columns.map((c: any) => <td key={c.name} className="p-1 align-top">{String(r[c.name])}</td>)}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {parsed.data.rows.length > 10 && <div className="text-[10px] p-1 text-muted-foreground">Showing first 10 of {parsed.data.rows.length} rows</div>}
+              </div>
+            )}
+            <div className="text-[10px] text-muted-foreground flex gap-2">
+              <span>conf: {parsed.confidence.level}</span>
+              <span>src: {parsed.source}</span>
+              {parsed.query_explainer?.sql && <span className="truncate max-w-[200px]" title={parsed.query_explainer.sql}>sql</span>}
+            </div>
+          </div>
+        )
       }
-    }
-
-    // Low stock queries
-    if (query.includes('low stock') || query.includes('reorder')) {
-      if (inventorySummary.low_stock_count > 0) {
-        const lowStockItems = inventorySummary.locations
-          ?.flatMap(loc => loc.products.filter(p => p.is_low_stock))
-          .slice(0, 5) || []
-        const itemList = lowStockItems.map(item => 
-          `${item.product_name} (${item.available_quantity} remaining)`
-        ).join(', ')
-        return `⚠️ ${inventorySummary.low_stock_count} items need restocking: ${itemList}`
-      } else {
-        return `✅ All products are well-stocked! No reorder alerts at this time.`
-      }
-    }
-
-    // Value queries
-    if (query.includes('value') || query.includes('worth')) {
-      const totalValue = inventorySummary.total_stock_value
-      return `💰 Total inventory value: $${totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    }
-
-    // Product count queries
-    if (query.includes('products') || query.includes('items')) {
-      const categories = new Set(products?.map(p => p.category).filter(Boolean) || [])
-      return `📊 You have ${inventorySummary.total_products} products across ${categories.size} categories in your inventory.`
-    }
-
-    // Location queries
-    if (query.includes('location') || query.includes('warehouse')) {
-      const locationSummary = inventorySummary.locations?.map(loc => 
-        `${loc.location_name}: ${loc.total_products} products`
-      ).join(', ') || ''
-      return `🏢 Inventory locations: ${locationSummary}`
-    }
-
-    // Default response with general insights
-    const insights = []
-    if (inventorySummary.low_stock_count > 0) {
-      insights.push(`${inventorySummary.low_stock_count} items need restocking`)
-    }
-    if (inventorySummary.out_of_stock_count > 0) {
-      insights.push(`${inventorySummary.out_of_stock_count} items are out of stock`)
-    }
-    if (insights.length === 0) {
-      insights.push('All inventory levels look healthy')
-    }
-
-    return `I can help with inventory questions! Current status: ${insights.join(', ')}. Try asking about "low stock", "inventory value", or "product count".`
+    } catch {}
+    return m.content
   }
 
   const send = async () => {
@@ -99,14 +70,18 @@ export default function ChatPage() {
     setMessages((m) => [...m, userMsg])
     setInput('')
     
-    // Generate response based on real inventory data
-    setTimeout(() => {
-      const response = generateResponse(userMsg.content)
-      setMessages((m) => [
-        ...m,
-        { role: 'assistant', content: response },
-      ])
-    }, 400)
+    chat.mutate(
+      { prompt: userMsg.content },
+      {
+        onSuccess: (data) => {
+          const packed = { ...data }
+          setMessages(m => [...m, { role: 'assistant', content: '__JSON__' + JSON.stringify(packed) }])
+        },
+        onError: (err: any) => {
+          setMessages(m => [...m, { role: 'assistant', content: err?.response?.data?.detail?.error || err.message }])
+        }
+      }
+    )
   }
 
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -136,13 +111,18 @@ export default function ChatPage() {
             <div className="space-y-3">
               {messages.map((m, i) => (
                 <div key={i} className={`${m.role === 'user' ? 'text-right' : 'text-left'}`}>
-                  <div className={`inline-block rounded-md px-3 py-2 text-sm ${
+                  <div className={`inline-block rounded-md px-3 py-2 text-sm max-w-[90%] whitespace-pre-wrap ${
                     m.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-background border'
                   }`}>
-                    {m.content}
+                    {renderStructured(m)}
                   </div>
                 </div>
               ))}
+              {chat.isPending && (
+                <div className="text-left">
+                  <div className="inline-block rounded-md px-3 py-2 text-xs bg-background border italic text-muted-foreground">Thinking...</div>
+                </div>
+              )}
             </div>
           </div>
           <div className="flex gap-2">
@@ -151,15 +131,21 @@ export default function ChatPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKey}
+              disabled={chat.isPending}
             />
-            <Button onClick={send}>Send</Button>
+            <Button onClick={send} disabled={chat.isPending || !input.trim()}>Send</Button>
           </div>
+          {messages.length === 1 && (
+            <div className="text-[10px] text-muted-foreground mt-2">
+              Examples: "top products by margin", "stockout risk", "week in review", "reorder suggestions"
+            </div>
+          )}
         </CardContent>
       </Card>
 
       <div className="mt-8">
         <Button variant="ghost" asChild>
-          <Link href="/">
+          <Link href="/dashboard">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Home
           </Link>
