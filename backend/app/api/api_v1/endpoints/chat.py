@@ -2,7 +2,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from datetime import datetime
+from datetime import datetime, timezone
 from app.core.database import get_db, get_current_claims
 from app.core.config import settings
 from app.schemas.chat import ChatQueryRequest, ChatQueryResponse, ConfidenceMeta, FreshnessMeta, QueryExplainer
@@ -11,17 +11,32 @@ from app.services.intent_resolver import resolve_intent
 from app.services.intent_rules import INTENT_HANDLERS, INTENT_PARAM_MODELS
 from app.services.llm_client import llm_intent_resolver
 from app.services.business_context import get_business_context
+import re
 
 router = APIRouter()
 
 async def _compute_freshness(db: Session, org_id: str):
-    inv_ts = db.execute(text("SELECT max(ts) as m FROM inventory_movements WHERE org_id=:org"), {"org": org_id}).fetchone()
+    # inventory_movements has no org_id and the column is named timestamp, not ts
+    inv_ts = db.execute(text(
+        """
+        SELECT max(im.timestamp) as m
+        FROM inventory_movements im
+        JOIN products p ON p.id = im.product_id
+        WHERE p.org_id = :org
+        """
+    ), {"org": org_id}).fetchone()
     order_ts = db.execute(text("SELECT max(ordered_at) as m FROM orders WHERE org_id=:org"), {"org": org_id}).fetchone()
     candidates = [r.m for r in [inv_ts, order_ts] if r and r.m]
     if candidates:
         latest = max(candidates)
-        lag = (datetime.utcnow() - latest).total_seconds()
-        return latest.isoformat(), int(lag)
+        # Normalize: make both sides timezone-aware UTC
+        now_utc = datetime.now(timezone.utc)
+        if getattr(latest, 'tzinfo', None) is None:
+            latest_aware = latest.replace(tzinfo=timezone.utc)
+        else:
+            latest_aware = latest.astimezone(timezone.utc)
+        lag = (now_utc - latest_aware).total_seconds()
+        return latest_aware.isoformat().replace('+00:00','Z'), int(lag)
     return None, None
 
 @router.post("/query", response_model=ChatQueryResponse)
@@ -43,7 +58,8 @@ async def chat_query(req: ChatQueryRequest, db: Session = Depends(get_db), claim
             # Get comprehensive business context
             business_context = get_business_context(db, org_id)
             answer = await llm_intent_resolver.general_chat(req.prompt, business_context)
-            now_iso = datetime.utcnow().isoformat()
+            answer = _sanitize_answer(answer)
+            now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
             
             return ChatQueryResponse(
                 intent=None,
@@ -74,7 +90,7 @@ async def chat_query(req: ChatQueryRequest, db: Session = Depends(get_db), claim
     data_payload = handler(validated_params, db, org_id)
 
     latest_ts, lag = await _compute_freshness(db, org_id)
-    now_iso = datetime.utcnow().isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
 
     # Confidence heuristic mapping
     level = 'high' if resolution.confidence >= 0.75 else 'medium' if resolution.confidence >= 0.55 else 'low'
@@ -100,6 +116,61 @@ async def chat_query(req: ChatQueryRequest, db: Session = Depends(get_db), claim
         query_explainer=explainer, freshness=freshness, confidence=confidence, source=resolution.source,
         warnings=[]
     )
+
+
+def _sanitize_answer(text: str) -> str:
+    """Convert markdown-ish output to plain text for UI without markdown rendering.
+
+    Rules:
+    - Strip **bold** markers
+    - Convert simple markdown tables to 'Header: value' lines
+    - Collapse multiple blank lines
+    - Trim whitespace
+    """
+    if not text:
+        return text
+    # Strip bold markers
+    text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
+    # Detect tables (lines starting with |)
+    lines = text.splitlines()
+    out = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.strip().startswith('|') and '|' in line[1:]:
+            # collect contiguous table lines
+            table_block = []
+            while i < len(lines) and lines[i].strip().startswith('|'):
+                table_block.append(lines[i]); i += 1
+            # parse table
+            if len(table_block) >= 2:
+                # first line headers, second maybe separator
+                header_line = table_block[0]
+                # skip separator line(s)
+                data_rows = [r for r in table_block[1:] if not set(r.replace('|','').strip()) <= {'-',' '}]
+                headers = [h.strip() for h in header_line.strip('|').split('|')]
+                for dr in data_rows:
+                    cells = [c.strip() for c in dr.strip('|').split('|')]
+                    if len(cells) == len(headers):
+                        for h, c in zip(headers, cells):
+                            if h.lower() != 'metric' or (h.lower() == 'metric' and c):
+                                out.append(f"{h.strip()}: {c}")
+                    else:
+                        out.append(dr)
+                continue
+        else:
+            out.append(line)
+            i += 1
+    # Collapse blank lines
+    cleaned = []
+    prev_blank = False
+    for l in out:
+        blank = not l.strip()
+        if blank and prev_blank:
+            continue
+        cleaned.append(l)
+        prev_blank = blank
+    return '\n'.join(cleaned).strip()
 
 
 def _summarize_with_context(intent: IntentName, payload: dict, db: Session, org_id: str) -> str:

@@ -1,8 +1,19 @@
-# Wrapper script so command `python ingest/run_ingest.py data/` works per acceptance criteria.
+"""Wrapper so `python ingest/run_ingest.py data/` works.
+
+Ensures project root is on sys.path so `rag` package is importable.
+"""
 from pathlib import Path
 import sys
 
-from rag.ingest.run_ingest import main as inner_main  # type: ignore
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+try:
+    from rag.ingest.run_ingest import main as inner_main  # type: ignore
+except Exception as e:  # pragma: no cover
+    print(f"Failed to import ingestion module: {e}")
+    sys.exit(1)
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

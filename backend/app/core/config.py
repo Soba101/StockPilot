@@ -1,8 +1,18 @@
 import os
 import socket
+from pathlib import Path
 from typing import List, Union
 from pydantic_settings import BaseSettings
 from pydantic import validator
+from dotenv import load_dotenv
+
+# Pre-load project root .env (one level above backend/) if running uvicorn from backend dir
+try:  # best-effort; silently continue if anything fails
+    root_env = Path(__file__).resolve().parents[3] / ".env"
+    if root_env.exists():
+        load_dotenv(root_env)
+except Exception:
+    pass
 
 class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
