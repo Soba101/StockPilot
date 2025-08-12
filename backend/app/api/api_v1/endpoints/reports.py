@@ -118,13 +118,14 @@ def generate_week_in_review(
     }).fetchone()
     
     # Calculate metrics
-    current_revenue = float(current_result.total_revenue or 0)
-    current_units = int(current_result.total_units or 0)
-    current_orders = int(current_result.total_orders or 0)
-    current_margin = float(current_result.gross_margin or 0)
+    # Safeguard if mart query returns None
+    current_revenue = float(getattr(current_result, 'total_revenue', 0) or 0)
+    current_units = int(getattr(current_result, 'total_units', 0) or 0)
+    current_orders = int(getattr(current_result, 'total_orders', 0) or 0)
+    current_margin = float(getattr(current_result, 'gross_margin', 0) or 0)
     
-    prev_revenue = float(prev_result.total_revenue or 0) if prev_result else 0
-    prev_units = int(prev_result.total_units or 0) if prev_result else 0
+    prev_revenue = float(getattr(prev_result, 'total_revenue', 0) or 0) if prev_result else 0
+    prev_units = int(getattr(prev_result, 'total_units', 0) or 0) if prev_result else 0
     
     # Calculate growth percentages
     revenue_change = ((current_revenue - prev_revenue) / prev_revenue * 100) if prev_revenue > 0 else 0
@@ -162,22 +163,58 @@ def generate_week_in_review(
         LIMIT 10
     """
     
-    top_products_result = db.execute(text(top_products_query), {
-        "org_id": org_id,
-        "start_date": start_date,
-        "end_date": end_date
-    }).fetchall()
-    
+    # Primary (mart) query attempt
+    try:
+        top_products_result = db.execute(text(top_products_query), {
+            "org_id": org_id,
+            "start_date": start_date,
+            "end_date": end_date
+        }).fetchall()
+    except Exception:
+        top_products_result = []
+
     top_products = []
+    # Fallback to base tables if mart empty or errored
+    if not top_products_result:
+        fallback_top_products_query = """
+            SELECT 
+                p.name as product_name,
+                p.sku as sku,
+                p.category as category,
+                SUM(oi.quantity * oi.unit_price) AS total_revenue,
+                SUM(oi.quantity) AS total_units,
+                CASE WHEN SUM(oi.quantity * oi.unit_price) > 0 THEN 
+                    (SUM( (oi.unit_price - COALESCE(p.cost,0)) * oi.quantity ) / SUM(oi.quantity * oi.unit_price)) * 100
+                ELSE 0 END AS avg_margin_percent,
+                ROW_NUMBER() OVER (ORDER BY SUM(oi.quantity * oi.unit_price) DESC) as rank
+            FROM orders o
+            JOIN order_items oi ON o.id = oi.order_id
+            JOIN products p ON oi.product_id = p.id
+            WHERE o.org_id = :org_id
+              AND o.status IN ('fulfilled','completed','shipped')
+              AND o.ordered_at BETWEEN :start_date AND :end_date
+            GROUP BY p.name, p.sku, p.category
+            ORDER BY total_revenue DESC
+            LIMIT 10
+        """
+        try:
+            top_products_result = db.execute(text(fallback_top_products_query), {
+                "org_id": org_id,
+                "start_date": start_date,
+                "end_date": end_date
+            }).fetchall()
+        except Exception:
+            top_products_result = []
+
     for row in top_products_result:
         top_products.append(TopPerformer(
-            name=row.product_name,
+            name=getattr(row, 'product_name', None) or getattr(row, 'name', 'Unknown'),
             sku=row.sku,
-            category=row.category or 'Uncategorized',
-            revenue=float(row.total_revenue),
-            units=int(row.total_units),
-            margin_percent=float(row.avg_margin_percent),
-            rank=int(row.rank)
+            category=(getattr(row, 'category', None) or 'Uncategorized'),
+            revenue=float(getattr(row, 'total_revenue', 0) or 0),
+            units=int(getattr(row, 'total_units', 0) or 0),
+            margin_percent=float(getattr(row, 'avg_margin_percent', 0) or 0),
+            rank=int(getattr(row, 'rank', 0) or 0)
         ))
     
     # Get inventory alerts using inventory summary
@@ -255,27 +292,53 @@ def generate_week_in_review(
         GROUP BY channel
         ORDER BY revenue DESC
     """
-    
-    channel_result = db.execute(text(channel_query), {
-        "org_id": org_id,
-        "start_date": start_date,
-        "end_date": end_date
-    }).fetchall()
-    
-    # Calculate total revenue for market share
-    total_channel_revenue = sum(float(row.revenue) for row in channel_result)
-    
+
+    try:
+        channel_result = db.execute(text(channel_query), {
+            "org_id": org_id,
+            "start_date": start_date,
+            "end_date": end_date
+        }).fetchall()
+    except Exception:
+        channel_result = []
+
     channel_insights = []
+    # Fallback to base tables if no mart data
+    if not channel_result:
+        fallback_channel_query = """
+            SELECT 
+                COALESCE(o.channel, 'Unknown') as channel,
+                SUM(oi.quantity * oi.unit_price) AS revenue,
+                SUM(oi.quantity) AS units,
+                COUNT(DISTINCT o.id) AS orders
+            FROM orders o
+            JOIN order_items oi ON o.id = oi.order_id
+            WHERE o.org_id = :org_id
+              AND o.status IN ('fulfilled','completed','shipped')
+              AND o.ordered_at BETWEEN :start_date AND :end_date
+            GROUP BY COALESCE(o.channel, 'Unknown')
+            ORDER BY revenue DESC
+        """
+        try:
+            channel_result = db.execute(text(fallback_channel_query), {
+                "org_id": org_id,
+                "start_date": start_date,
+                "end_date": end_date
+            }).fetchall()
+        except Exception:
+            channel_result = []
+
+    total_channel_revenue = sum(float(getattr(row, 'revenue', 0) or 0) for row in channel_result)
+
     for row in channel_result:
-        channel_revenue = float(row.revenue)
+        channel_revenue = float(getattr(row, 'revenue', 0) or 0)
         market_share = (channel_revenue / total_channel_revenue * 100) if total_channel_revenue > 0 else 0
-        
         channel_insights.append(ChannelInsight(
-            channel=row.channel or 'Unknown',
+            channel=getattr(row, 'channel', None) or 'Unknown',
             revenue=channel_revenue,
-            units=int(row.units),
-            orders=int(row.orders),
-            growth_percent=0,  # Would need previous period comparison
+            units=int(getattr(row, 'units', 0) or 0),
+            orders=int(getattr(row, 'orders', 0) or 0),
+            growth_percent=0,
             market_share_percent=round(market_share, 1)
         ))
     
@@ -344,8 +407,6 @@ def generate_week_in_review(
         recommendations=recommendations,
         summary=summary
     )
-
-
 @router.get("/week-in-review/historical")
 def get_historical_reports(
     limit: int = Query(10, ge=1, le=50, description="Number of reports to return"),

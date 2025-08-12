@@ -375,23 +375,29 @@ export default function ReportsPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {report.top_products.map((product) => (
-                      <div key={product.sku} className="flex items-center justify-between p-4 border rounded-lg">
-                        <div className="flex items-center gap-4">
-                          <Badge variant="outline">#{product.rank}</Badge>
-                          <div>
-                            <div className="font-medium">{product.name}</div>
-                            <div className="text-sm text-muted-foreground">{product.sku} • {product.category}</div>
+                    {report.top_products.length > 0 ? (
+                      report.top_products.map((product) => (
+                        <div key={product.sku} className="flex items-center justify-between p-4 border rounded-lg">
+                          <div className="flex items-center gap-4">
+                            <Badge variant="outline">#{product.rank}</Badge>
+                            <div>
+                              <div className="font-medium">{product.name}</div>
+                              <div className="text-sm text-muted-foreground">{product.sku} • {product.category}</div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-bold">${product.revenue.toLocaleString()}</div>
+                            <div className="text-sm text-muted-foreground">
+                              {product.units} units • {product.margin_percent.toFixed(1)}% margin
+                            </div>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <div className="font-bold">${product.revenue.toLocaleString()}</div>
-                          <div className="text-sm text-muted-foreground">
-                            {product.units} units • {product.margin_percent.toFixed(1)}% margin
-                          </div>
-                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-8 text-muted-foreground">
+                        No product sales data for this period
                       </div>
-                    ))}
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -443,23 +449,29 @@ export default function ReportsPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {report.channel_insights.map((channel) => (
-                      <div key={channel.channel} className="flex items-center justify-between p-4 border rounded-lg">
-                        <div className="flex items-center gap-4">
-                          <Badge variant="outline">{channel.market_share_percent.toFixed(1)}%</Badge>
-                          <div>
-                            <div className="font-medium">{channel.channel}</div>
-                            <div className="text-sm text-muted-foreground">{channel.orders} orders</div>
+                    {report.channel_insights.length > 0 ? (
+                      report.channel_insights.map((channel) => (
+                        <div key={channel.channel} className="flex items-center justify-between p-4 border rounded-lg">
+                          <div className="flex items-center gap-4">
+                            <Badge variant="outline">{channel.market_share_percent.toFixed(1)}%</Badge>
+                            <div>
+                              <div className="font-medium">{channel.channel}</div>
+                              <div className="text-sm text-muted-foreground">{channel.orders} orders</div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-bold">${channel.revenue.toLocaleString()}</div>
+                            <div className="text-sm text-muted-foreground">
+                              {channel.units} units
+                            </div>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <div className="font-bold">${channel.revenue.toLocaleString()}</div>
-                          <div className="text-sm text-muted-foreground">
-                            {channel.units} units
-                          </div>
-                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-8 text-muted-foreground">
+                        No channel performance data for this period
                       </div>
-                    ))}
+                    )}
                   </div>
                 </CardContent>
               </Card>

@@ -204,6 +204,21 @@ class TestAnalyticsExtensionsIntegration:
             assert field in summary
             assert isinstance(summary[field], (int, float))
 
+    def test_week_in_review_report(self, auth_headers):
+        """Test week in review report endpoint returns expected structure and does not error when marts empty."""
+        r = requests.get(f"{API_BASE}/reports/week-in-review", headers=auth_headers)
+        assert r.status_code == 200
+        data = r.json()
+        # Core sections
+        for key in ["report_id", "generated_at", "period", "top_products", "inventory_alerts", "channel_insights", "key_insights", "recommendations", "summary"]:
+            assert key in data
+        # Arrays present
+        assert isinstance(data["top_products"], list)
+        assert isinstance(data["channel_insights"], list)
+        # Period subfields
+        for sub in ["total_revenue", "total_units", "total_orders", "gross_margin", "margin_percent"]:
+            assert sub in data["period"]
+
 class TestPurchasingIntegration:
     """Integration tests for Purchasing operations"""
     
