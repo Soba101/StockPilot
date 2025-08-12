@@ -2,6 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, text
+from sqlalchemy.exc import ProgrammingError
 from datetime import datetime, timedelta, date
 from app.core.database import get_db, get_current_claims
 from app.models.product import Product
@@ -99,6 +100,10 @@ class StockoutRisk(BaseModel):
     velocity_30d: Optional[float]
     days_to_stockout: Optional[float]
     risk_level: str  # none|low|medium|high
+    # W4 additive fields (kept optional for backward compatibility)
+    velocity_source: Optional[str] = None  # 7d|30d|56d|none
+    velocity_56d: Optional[float] = None
+    forecast_30d_units: Optional[float] = None
 
 
 @router.get("", response_model=AnalyticsResponse)
@@ -520,6 +525,7 @@ def get_sales_analytics(
 @router.get("/stockout-risk", response_model=List[StockoutRisk])
 def get_stockout_risk(
     days: int = Query(30, ge=7, le=120, description="Lookback window for velocity context"),
+    velocity_strategy: str = Query("latest", pattern="^(latest|conservative)$", description="Velocity selection strategy"),
     db: Session = Depends(get_db),
     claims = Depends(get_current_claims),
 ):
@@ -553,15 +559,40 @@ def get_stockout_risk(
     # Velocity (average of rolling averages over window)
     velocity_sql = text("""
         SELECT sd.sku, 
-               AVG(sd.units_7day_avg) as v7,
-               AVG(sd.units_30day_avg) as v30
-        FROM analytics_marts.sales_daily sd
-        WHERE sd.org_id = :org_id
-          AND sd.sales_date >= :start_date
+                             AVG(sd.units_7day_avg) as v7,
+                             AVG(sd.units_30day_avg) as v30,
+                             AVG(sd.units_56day_avg) as v56,
+                             AVG(COALESCE(sd.units_7day_avg, sd.units_30day_avg, sd.units_56day_avg) * 30) as forecast_30d
+                FROM analytics_marts.sales_daily sd
+                WHERE sd.org_id = :org_id
+                    AND sd.sales_date >= :start_date
         GROUP BY sd.sku
     """)
     start_date = (datetime.now().date() - timedelta(days=days))
-    vel_rows = db.execute(velocity_sql, {"org_id": org_id, "start_date": start_date}).fetchall()
+    # Determine if 56-day column exists to avoid broken transaction on missing column
+    col_check = db.execute(text("""
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema='analytics_marts' AND table_name='sales_daily' AND column_name='units_56day_avg'
+    """)).fetchone()
+    if col_check:
+        try:
+            vel_rows = db.execute(velocity_sql, {"org_id": org_id, "start_date": start_date}).fetchall()
+        except ProgrammingError:
+            db.rollback()
+            vel_rows = []
+    else:
+        fallback_velocity_sql = text("""
+            SELECT sd.sku,
+                   AVG(sd.units_7day_avg) as v7,
+                   AVG(sd.units_30day_avg) as v30,
+                   NULL::numeric as v56,
+                   AVG(COALESCE(sd.units_7day_avg, sd.units_30day_avg) * 30) as forecast_30d
+            FROM analytics_marts.sales_daily sd
+            WHERE sd.org_id = :org_id
+              AND sd.sales_date >= :start_date
+            GROUP BY sd.sku
+        """)
+        vel_rows = db.execute(fallback_velocity_sql, {"org_id": org_id, "start_date": start_date}).fetchall()
     velocity_map = {r.sku: r for r in vel_rows}
 
     results: List[StockoutRisk] = []
@@ -570,12 +601,27 @@ def get_stockout_risk(
         vel_row = velocity_map.get(row.sku)
         v7 = float(vel_row.v7) if vel_row and vel_row.v7 is not None else None
         v30 = float(vel_row.v30) if vel_row and vel_row.v30 is not None else None
-        # Choose velocity priority: v7 if >0 else v30 if >0 else None
+        v56 = float(vel_row.v56) if vel_row and vel_row.v56 is not None else None
+        forecast_30d = float(vel_row.forecast_30d) if vel_row and vel_row.forecast_30d is not None else None
+
         chosen_velocity = None
-        if v7 and v7 > 0:
-            chosen_velocity = v7
-        elif v30 and v30 > 0:
-            chosen_velocity = v30
+        velocity_source = "none"
+        candidates = [v for v in [v7, v30, v56] if v and v > 0]
+        if velocity_strategy == "latest":
+            for val, src in [(v7, "7d"), (v30, "30d"), (v56, "56d")]:
+                if val and val > 0:
+                    chosen_velocity = val
+                    velocity_source = src
+                    break
+        else:  # conservative
+            if candidates:
+                chosen_velocity = min(candidates)
+                if chosen_velocity == v7:
+                    velocity_source = "7d"
+                elif chosen_velocity == v30:
+                    velocity_source = "30d"
+                elif chosen_velocity == v56:
+                    velocity_source = "56d"
 
         days_to_stockout = None
         if chosen_velocity and chosen_velocity > 0:
@@ -606,7 +652,10 @@ def get_stockout_risk(
             velocity_7d=v7,
             velocity_30d=v30,
             days_to_stockout=round(days_to_stockout, 1) if days_to_stockout is not None else None,
-            risk_level=risk_level
+            risk_level=risk_level,
+            velocity_source=velocity_source,
+            velocity_56d=v56,
+            forecast_30d_units=forecast_30d
         ))
 
     # Sort by highest risk then shortest days_to_stockout

@@ -85,6 +85,13 @@ sales_with_trends as (
             rows between 29 preceding and current row
         ) as units_30day_avg,
         
+        -- 56-day rolling average (longer-term velocity)
+        avg(units_sold) over (
+            partition by product_id, location_id 
+            order by sales_date 
+            rows between 55 preceding and current row
+        ) as units_56day_avg,
+        
         -- Previous day comparison
         lag(units_sold, 1) over (
             partition by product_id, location_id 
@@ -98,7 +105,15 @@ sales_with_trends as (
         ) as units_prev_week
         
     from daily_sales
+),
+
+final as (
+    select
+        *,
+        -- Simple 30 day unit forecast using preferred available velocity hierarchy
+        (coalesce(units_7day_avg, units_30day_avg, units_56day_avg) * 30)::numeric as forecast_30d_units
+    from sales_with_trends
 )
 
-select * from sales_with_trends
+select * from final
 order by sales_date desc, gross_revenue desc

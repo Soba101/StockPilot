@@ -19,6 +19,18 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: Union[str, List[str]] = "http://localhost:3000,http://127.0.0.1:3000"
     
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+
+    # Alerting / notifications
+    ALERT_CRON_TOKEN: str = os.getenv("ALERT_CRON_TOKEN", "dev-cron-token")
+    ALERT_EMAIL_FROM: str = os.getenv("ALERT_EMAIL_FROM", "alerts@stockpilot.local")
+    ALERT_EMAIL_TO: str = os.getenv("ALERT_EMAIL_TO", "")  # optional override
+    SMTP_HOST: str = os.getenv("SMTP_HOST", "")
+    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "25"))
+    SMTP_USER: str = os.getenv("SMTP_USER", "")
+    SMTP_PASS: str = os.getenv("SMTP_PASS", "")
+    ALERT_WEBHOOK_URL: str = os.getenv("ALERT_WEBHOOK_URL", "")
+    ALERT_SIGNING_SECRET: str = os.getenv("ALERT_SIGNING_SECRET", "")
+    ALERT_DAILY_HOUR: int = int(os.getenv("ALERT_DAILY_HOUR", "8"))
     
     @validator("ALLOWED_ORIGINS", pre=True)
     def parse_allowed_origins(cls, v):

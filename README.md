@@ -127,6 +127,27 @@ frontend/
 
 Local dev via Docker; deploy backend & dbt on managed Postgres (Railway noted). Provide environment variables mirroring those in `app/core/config.py` plus `JWT_SECRET` & OpenAI key for chat.
 
+## Environment Variables
+
+### Alerting / Notifications (W4)
+
+Add these to your `.env` (backend):
+
+```env
+ALERT_CRON_TOKEN=dev-cron-token
+ALERT_EMAIL_FROM=alerts@stockpilot.local
+ALERT_EMAIL_TO=
+SMTP_HOST=
+SMTP_PORT=1025
+SMTP_USER=
+SMTP_PASS=
+ALERT_WEBHOOK_URL=
+ALERT_SIGNING_SECRET=
+ALERT_DAILY_HOUR=8
+```
+
+`ALERT_CRON_TOKEN` secures the internal `POST /api/v1/internal/run-daily-alerts` endpoint.
+If SMTP / webhook settings are blank the system logs digest output instead of erroring
 ---
 
 Concise docs intentionally; see code & tests for authoritative patterns.

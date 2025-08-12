@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: sales_daily
+    description: Daily sales aggregation with rolling velocity metrics.
+    columns:
+      - name: units_7day_avg
+        description: 7 day rolling average units sold.
+      - name: units_30day_avg
+        description: 30 day rolling average units sold.
+      - name: units_56day_avg
+        description: 56 day rolling average units sold (long horizon).
+        tests:
+          - not_null: {config: {where: "sales_date >= current_date - interval '56 days'"}}
+      - name: forecast_30d_units
+        description: Simple projected 30 day units using best available velocity * 30.
+        tests:
+          - custom_non_negative

@@ -9,6 +9,9 @@ export interface StockoutRiskRow {
   reorder_point?: number | null;
   velocity_7d?: number | null;
   velocity_30d?: number | null;
+  velocity_56d?: number | null;
+  velocity_source?: '7d' | '30d' | '56d' | 'none';
+  forecast_30d_units?: number | null;
   days_to_stockout?: number | null;
   risk_level: 'none' | 'low' | 'medium' | 'high';
 }
