@@ -39,7 +39,7 @@ Inventory, purchasing & sales analytics with an event‑sourced inventory core a
 
 ## Architecture & Data Flow
 
-User actions / imports → FastAPI CRUD → PostgreSQL core tables → append‑only `inventory_movements` (event sourcing) → dbt staging & marts (`sales_daily`, etc.) → Analytics & Reports endpoints → React/Next.js (App Router) + React Query → Chat assistant surfaces metrics.
+User actions / imports → FastAPI CRUD → PostgreSQL core tables → append‑only `inventory_movements` (event sourcing) → dbt staging & marts (`sales_daily`, etc.) → Analytics & Reports endpoints → React/Next.js (App Router) + React Query → AI Chat assistant surfaces metrics with structured responses.
 
 ### Key Components
 
@@ -50,7 +50,7 @@ User actions / imports → FastAPI CRUD → PostgreSQL core tables → append‑
 | dbt | Transform + precompute metrics | `sales_daily` supplies velocity + margin + rolling avgs |
 | Analytics Endpoints | `/analytics`, `/analytics/sales`, `/analytics/stockout-risk`, `/reports/week-in-review` | Mart‑first with graceful fallback |
 | Frontend | Next.js (App Router) | Hooks isolate data fetching; dynamic API base in `src/lib/api.ts` |
-| Chat | Lightweight intent routing | Reuses existing hooks; keyword branching |
+| AI Chat | Intent resolution + LLM fallback | Deterministic rules → OpenAI; structured data responses |
 
 ## Multi‑Tenancy & Security
 
@@ -66,6 +66,7 @@ Features:
 - Detailed sales breakdown & channel performance (`/analytics/sales`)
 - Stockout risk (live on‑hand + rolling velocity, risk tiers ≤7/≤14/≤30 days) (`/analytics/stockout-risk`)
 - Week in Review consolidated report (`/reports/week-in-review` + CSV export)
+- AI Chat with intent recognition (`/chat`) - supports queries like "top margin products", "stockout risk", "slow movers"
 
 If mart query fails (dbt not yet run), endpoints fall back to base tables—retain this pattern for new analytics.
 
@@ -129,11 +130,22 @@ Local dev via Docker; deploy backend & dbt on managed Postgres (Railway noted). 
 
 ## Environment Variables
 
-### Alerting / Notifications (W4)
-
-Add these to your `.env` (backend):
+Essential backend environment variables (create `.env` in project root):
 
 ```env
+# Core Configuration
+DATABASE_URL=postgresql://stockpilot:stockpilot_dev@localhost:5432/stockpilot
+SECRET_KEY=your-jwt-secret-key
+REDIS_URL=redis://localhost:6379/0
+
+# AI Chat Features
+OPENAI_API_KEY=your-openai-api-key
+CHAT_ENABLED=1
+CHAT_LLM_FALLBACK_ENABLED=1
+LLM_BASE_URL=http://127.0.0.1:1234  # Alternative local LLM
+LLM_MODEL_ID=openai/gpt-oss-20b
+
+# Alerting / Notifications
 ALERT_CRON_TOKEN=dev-cron-token
 ALERT_EMAIL_FROM=alerts@stockpilot.local
 ALERT_EMAIL_TO=
@@ -147,7 +159,7 @@ ALERT_DAILY_HOUR=8
 ```
 
 `ALERT_CRON_TOKEN` secures the internal `POST /api/v1/internal/run-daily-alerts` endpoint.
-If SMTP / webhook settings are blank the system logs digest output instead of erroring
+If SMTP / webhook settings are blank the system logs digest output instead of erroring.
 
 ## Reorder Computation (W5)
 
@@ -221,6 +233,32 @@ Visit `/purchasing/suggestions` to:
 - Export suggestions to CSV
 - View detailed explanations for each recommendation
 
+## AI Chat System
+
+The chat interface (`/chat`) provides natural language access to business metrics with intent-based routing:
+
+### Supported Queries
+- **Top Margin Products**: "top 5 margin products", "most profitable SKUs"
+- **Stockout Risk**: "what might run out", "stockout risk next 14 days"
+- **Sales Review**: "week in review", "last week summary"
+- **Reorder Suggestions**: "what to reorder", "purchase suggestions" 
+- **Slow Movers**: "slow moving inventory", "dead stock"
+- **Product Details**: "tell me about SKU-001", "sales for Widget-A"
+
+### Technical Implementation
+1. **Intent Resolution**: Deterministic keyword matching in `backend/app/services/intent_rules.py`
+2. **LLM Fallback**: OpenAI integration for ambiguous queries when enabled
+3. **Structured Responses**: JSON data tables with confidence/freshness metadata
+4. **Existing Hook Reuse**: Chat responses leverage the same React Query hooks as the UI
+
 ---
+
+## Recent Features & Updates
+
+- **AI Chat Interface**: Natural language queries with structured data responses
+- **Product Detail Intent**: Get comprehensive product metrics via chat
+- **Enhanced Error Handling**: Improved fallback logic for missing analytics data
+- **Intent Resolution Service**: Deterministic keyword matching with LLM backup
+- **Structured Chat Responses**: Tabular data rendering with metadata
 
 Concise docs intentionally; see code & tests for authoritative patterns.
