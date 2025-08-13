@@ -12,6 +12,7 @@ from app.schemas.chat import (
     ReorderSuggestionsParams,
     SlowMoversParams,
     ProductDetailParams,
+    QuarterlyForecastParams,
 )
 
 HandlerFn = Callable[[Dict[str, Any], Session, str], Dict[str, Any]]
@@ -19,12 +20,13 @@ HandlerFn = Callable[[Dict[str, Any], Session, str], Dict[str, Any]]
 # ---------------- Intent Resolution (rule based) -----------------
 
 INTENT_KEYWORDS = {
-    'top_skus_by_margin': ['top', 'margin', 'sku', 'skus', 'profit'],
-    'stockout_risk': ['stockout', 'run out', 'risk'],
-    'week_in_review': ['week in review', 'last week', 'summary', 'review'],
-    'reorder_suggestions': ['reorder', 'suggestion', 'po draft', 'purchase'],
-    'slow_movers': ['slow', 'not selling', "can't move", 'cant move', 'stuck', 'dead stock', 'dead inventory'],
-    'product_detail': ['detail', 'tell me about', 'units sold', 'sales for', 'inventory for', 'stock for']
+    'top_skus_by_margin': ['top', 'margin', 'sku', 'skus', 'profit', 'best', 'best selling', 'best sale', 'top selling', 'highest', 'most profitable'],
+    'stockout_risk': ['stockout', 'run out', 'risk', 'out of stock', 'low inventory'],
+    'week_in_review': ['week in review', 'last week', 'summary', 'review', 'weekly', 'this week'],
+    'reorder_suggestions': ['reorder', 'suggestion', 'po draft', 'purchase', 'buy', 'order', 'replenish'],
+    'slow_movers': ['slow', 'not selling', "can't move", 'cant move', 'stuck', 'dead stock', 'dead inventory', 'sitting'],
+    'product_detail': ['detail', 'tell me about', 'units sold', 'sales for', 'inventory for', 'stock for', 'how much', 'how many'],
+    'quarterly_forecast': ['quarter', 'quarterly', 'forecast', 'projection', 'expected', 'predict', 'estimate', 'q1', 'q2', 'q3', 'q4']
 }
 
 # Mapping needed by chat endpoint to validate params
@@ -35,11 +37,13 @@ INTENT_PARAM_MODELS = {
     'reorder_suggestions': ReorderSuggestionsParams,
     'slow_movers': SlowMoversParams,
     'product_detail': ProductDetailParams,
+    'quarterly_forecast': QuarterlyForecastParams,
 }
 
 PARAM_NORMALIZERS = [
     (re.compile(r'last week|past week', re.I), 'period', lambda _: '7d'),
     (re.compile(r'last month|past 30 days', re.I), 'period', lambda _: '30d'),
+    (re.compile(r'today|today\'s|todays', re.I), 'period', lambda _: '1d'),
     (re.compile(r'(?P<n>top ?(\d{1,2}))', re.I), 'n', lambda m: int(re.findall(r'\d+', m.group('n'))[0])),
     (re.compile(r'(?P<hd>(7|14|30)) ?day', re.I), 'horizon_days', lambda m: int(m.group('hd'))),
 ]
@@ -70,7 +74,12 @@ def resolve_intent_rules(prompt: str) -> IntentResolution:
 
 def handler_top_skus_by_margin(params: Dict[str, Any], db: Session, org_id: str) -> Dict[str, Any]:
     p = TopSkusByMarginParams(**params)
-    days = 7 if p.period == '7d' else 30
+    if p.period == '1d':
+        days = 1
+    elif p.period == '7d':
+        days = 7
+    else:
+        days = 30
     limit = p.n
     mart_sql = text("""
         SELECT product_name, sku, sum(gross_margin) AS gross_margin, sum(gross_revenue) AS revenue, sum(units_sold) AS units
@@ -279,6 +288,123 @@ def handler_slow_movers(params: Dict[str, Any], db: Session, org_id: str) -> Dic
         "definition": f"Products with on-hand inventory but low sales in last {days} days (potential dead stock).",
     }
 
+def handler_quarterly_forecast(params: Dict[str, Any], db: Session, org_id: str) -> Dict[str, Any]:
+    p = QuarterlyForecastParams(**params)
+    
+    # Calculate current quarter dates
+    from datetime import date, datetime
+    import calendar
+    
+    today = date.today()
+    current_quarter = ((today.month - 1) // 3) + 1
+    current_year = today.year
+    
+    if p.period == 'current_quarter':
+        quarter_start_month = (current_quarter - 1) * 3 + 1
+        quarter_end_month = current_quarter * 3
+    else:  # next_quarter
+        next_quarter = current_quarter + 1 if current_quarter < 4 else 1
+        next_year = current_year if current_quarter < 4 else current_year + 1
+        quarter_start_month = (next_quarter - 1) * 3 + 1
+        quarter_end_month = next_quarter * 3
+        current_year = next_year
+    
+    # Get last 4 quarters of data for trend analysis
+    sql = text("""
+        WITH quarterly_data AS (
+            SELECT 
+                EXTRACT(YEAR FROM sales_date) as year,
+                EXTRACT(QUARTER FROM sales_date) as quarter,
+                SUM(gross_revenue) as revenue,
+                SUM(units_sold) as units,
+                SUM(gross_margin) as margin
+            FROM analytics_marts.sales_daily 
+            WHERE org_id = :org_id 
+                AND sales_date >= (CURRENT_DATE - INTERVAL '15 months')
+            GROUP BY EXTRACT(YEAR FROM sales_date), EXTRACT(QUARTER FROM sales_date)
+            ORDER BY year, quarter
+        ),
+        current_quarter_partial AS (
+            SELECT 
+                SUM(gross_revenue) as current_revenue,
+                SUM(units_sold) as current_units,
+                SUM(gross_margin) as current_margin,
+                COUNT(DISTINCT sales_date) as days_elapsed
+            FROM analytics_marts.sales_daily
+            WHERE org_id = :org_id 
+                AND EXTRACT(YEAR FROM sales_date) = :current_year
+                AND EXTRACT(QUARTER FROM sales_date) = :current_quarter
+        )
+        SELECT 
+            qd.*,
+            cq.current_revenue,
+            cq.current_units, 
+            cq.current_margin,
+            cq.days_elapsed
+        FROM quarterly_data qd
+        CROSS JOIN current_quarter_partial cq
+    """)
+    
+    rows = db.execute(sql, {
+        "org_id": org_id, 
+        "current_year": current_year,
+        "current_quarter": current_quarter
+    }).fetchall()
+    
+    if not rows:
+        return {
+            "columns": [],
+            "rows": [],
+            "sql": sql.text.replace('\n', ' '),
+            "definition": "No historical data available for quarterly forecast."
+        }
+    
+    # Calculate trend and projection
+    historical = [r for r in rows if r.revenue is not None]
+    current = rows[0] if rows else None
+    
+    if len(historical) >= 2:
+        # Simple linear trend
+        recent_quarters = historical[-4:] if len(historical) >= 4 else historical
+        avg_revenue = sum(q.revenue for q in recent_quarters) / len(recent_quarters)
+        
+        # Project current quarter if partial data exists
+        if current and current.days_elapsed and current.days_elapsed > 0:
+            days_in_quarter = 90  # approximate
+            projection_factor = days_in_quarter / current.days_elapsed
+            projected_revenue = float(current.current_revenue or 0) * projection_factor
+            projected_units = int((current.current_units or 0) * projection_factor)
+            projected_margin = float(current.current_margin or 0) * projection_factor
+        else:
+            projected_revenue = avg_revenue
+            projected_units = int(sum(q.units for q in recent_quarters) / len(recent_quarters))
+            projected_margin = sum(q.margin for q in recent_quarters) / len(recent_quarters)
+    else:
+        projected_revenue = float(current.current_revenue or 0) if current else 0
+        projected_units = int(current.current_units or 0) if current else 0
+        projected_margin = float(current.current_margin or 0) if current else 0
+    
+    result_row = {
+        "quarter": f"Q{current_quarter} {current_year}",
+        "projected_revenue": round(projected_revenue, 2),
+        "projected_units": projected_units,
+        "projected_margin": round(projected_margin, 2),
+        "confidence": "medium" if len(historical) >= 4 else "low"
+    }
+    
+    return {
+        "columns": [
+            {"name": "quarter", "type": "string"},
+            {"name": "projected_revenue", "type": "number"},
+            {"name": "projected_units", "type": "number"},
+            {"name": "projected_margin", "type": "number"},
+            {"name": "confidence", "type": "string"},
+        ],
+        "rows": [result_row],
+        "sql": sql.text.replace('\n', ' '),
+        "definition": f"Quarterly forecast based on historical trends and current quarter performance."
+    }
+
 def handler_product_detail(params: Dict[str, Any], db: Session, org_id: str) -> Dict[str, Any]:
     p = ProductDetailParams(**params)
     # Accept lookup by sku or name (prefer sku)
@@ -355,14 +481,6 @@ INTENT_HANDLERS: Dict[str, HandlerFn] = {
     'reorder_suggestions': handler_reorder_suggestions,
     'slow_movers': handler_slow_movers,
     'product_detail': handler_product_detail,
-}
-
-INTENT_HANDLERS: Dict[str, HandlerFn] = {
-    'top_skus_by_margin': handler_top_skus_by_margin,
-    'stockout_risk': handler_stockout_risk,
-    'week_in_review': handler_week_in_review,
-    'reorder_suggestions': handler_reorder_suggestions,
-    'slow_movers': handler_slow_movers,
-    'product_detail': handler_product_detail,
+    'quarterly_forecast': handler_quarterly_forecast,
 }
 

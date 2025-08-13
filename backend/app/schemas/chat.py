@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field, validator
 
 # Intent parameter models
 
-PeriodEnum = Literal['7d','30d']
+PeriodEnum = Literal['1d','7d','30d']
 
 class TopSkusByMarginParams(BaseModel):
     period: PeriodEnum = '7d'
@@ -30,7 +30,11 @@ class ProductDetailParams(BaseModel):
     sku: Optional[str] = None
     name: Optional[str] = None
 
-IntentName = Literal['top_skus_by_margin','stockout_risk','week_in_review','reorder_suggestions','slow_movers','product_detail']
+class QuarterlyForecastParams(BaseModel):
+    period: Literal['current_quarter', 'next_quarter'] = 'current_quarter'
+    metric: Literal['revenue', 'units', 'margin'] = 'revenue'
+
+IntentName = Literal['top_skus_by_margin','stockout_risk','week_in_review','reorder_suggestions','slow_movers','product_detail','quarterly_forecast']
 
 # Chat request / response
 class ChatQueryRequest(BaseModel):
