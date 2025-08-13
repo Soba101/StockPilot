@@ -30,13 +30,12 @@ class Order(Base, BaseModel):
 class OrderItem(Base, BaseModel):
     __tablename__ = "order_items"
 
-    # id inherited from BaseModel
+    # id, created_at, updated_at inherited from BaseModel
     order_id = Column(BaseModel.UUIDType, ForeignKey("orders.id"), nullable=False)
     product_id = Column(BaseModel.UUIDType, ForeignKey("products.id"), nullable=False)
     quantity = Column(Integer, nullable=False)
     unit_price = Column(DECIMAL(10, 2), nullable=False)
     discount = Column(DECIMAL(10, 2), default=0)
-    created_at = Column(DateTime(timezone=True), default=func.now())
 
     # Relationships
     order = relationship("Order", back_populates="order_items")
