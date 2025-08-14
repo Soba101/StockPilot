@@ -4,7 +4,8 @@
       "Bash(docker exec:*)",
       "Bash(source:*)",
       "Bash(conda activate:*)",
-      "Bash(/opt/anaconda3/envs/stockpilot/bin/python ingest/run_ingest.py ../data/)"
+      "Bash(/opt/anaconda3/envs/stockpilot/bin/python ingest/run_ingest.py ../data/)",
+      "Bash(curl:*)"
     ],
     "deny": []
   },

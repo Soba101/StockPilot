@@ -255,6 +255,79 @@ def handler_stockout_risk(params: Dict[str, Any], db: Session, org_id: str) -> D
         "definition": "Products at risk of stocking out within the specified horizon based on recent velocity.",
     }
 
+def handler_annual_breakdown(params: Dict[str, Any], db: Session, org_id: str, target_year: int = None) -> Dict[str, Any]:
+    """Enhanced handler for annual revenue queries with quarterly breakdown."""
+    from datetime import date
+    current_year = target_year or date.today().year
+    
+    sql = text("""
+        WITH quarterly_data AS (
+            SELECT 
+                EXTRACT(YEAR FROM sales_date) as year,
+                CASE 
+                    WHEN EXTRACT(MONTH FROM sales_date) IN (1,2,3) THEN 'Q1'
+                    WHEN EXTRACT(MONTH FROM sales_date) IN (4,5,6) THEN 'Q2' 
+                    WHEN EXTRACT(MONTH FROM sales_date) IN (7,8,9) THEN 'Q3'
+                    WHEN EXTRACT(MONTH FROM sales_date) IN (10,11,12) THEN 'Q4'
+                END as quarter,
+                sum(gross_revenue) as revenue,
+                sum(units_sold) as units,
+                sum(gross_margin) as margin,
+                count(distinct sales_date) as active_days
+            FROM analytics_marts.sales_daily
+            WHERE org_id=:org_id AND EXTRACT(YEAR FROM sales_date) = :current_year
+            GROUP BY EXTRACT(YEAR FROM sales_date), 
+                     CASE 
+                         WHEN EXTRACT(MONTH FROM sales_date) IN (1,2,3) THEN 'Q1'
+                         WHEN EXTRACT(MONTH FROM sales_date) IN (4,5,6) THEN 'Q2' 
+                         WHEN EXTRACT(MONTH FROM sales_date) IN (7,8,9) THEN 'Q3'
+                         WHEN EXTRACT(MONTH FROM sales_date) IN (10,11,12) THEN 'Q4'
+                     END
+        )
+        SELECT 
+            year,
+            quarter,
+            revenue,
+            units,
+            margin,
+            active_days,
+            CASE WHEN revenue > 0 THEN (margin/revenue*100) ELSE 0 END as margin_percentage
+        FROM quarterly_data
+        ORDER BY year, 
+                CASE quarter 
+                    WHEN 'Q1' THEN 1 
+                    WHEN 'Q2' THEN 2 
+                    WHEN 'Q3' THEN 3 
+                    WHEN 'Q4' THEN 4 
+                END
+    """)
+    
+    rows = db.execute(sql, {"org_id": org_id, "current_year": current_year}).fetchall()
+    data_rows = [{
+        "year": int(r.year),
+        "quarter": r.quarter,
+        "revenue": float(r.revenue or 0),
+        "units": int(r.units or 0),
+        "margin": float(r.margin or 0),
+        "active_days": int(r.active_days or 0),
+        "margin_percentage": round(float(r.margin_percentage or 0), 1)
+    } for r in rows]
+    
+    return {
+        "columns": [
+            {"name": "year", "type": "number"},
+            {"name": "quarter", "type": "string"},
+            {"name": "revenue", "type": "number"},
+            {"name": "units", "type": "number"},
+            {"name": "margin", "type": "number"},
+            {"name": "active_days", "type": "number"},
+            {"name": "margin_percentage", "type": "number"}
+        ],
+        "rows": data_rows,
+        "sql": sql.text.replace('\n', ' '),
+        "definition": f"{current_year} annual performance broken down by quarters showing revenue, units, margin and profitability."
+    }
+
 def handler_week_in_review(params: Dict[str, Any], db: Session, org_id: str) -> Dict[str, Any]:
     _ = WeekInReviewParams(**params)  # currently no extra params
     sql = text("""
@@ -558,5 +631,6 @@ INTENT_HANDLERS: Dict[str, HandlerFn] = {
     'slow_movers': handler_slow_movers,
     'product_detail': handler_product_detail,
     'quarterly_forecast': handler_quarterly_forecast,
+    'annual_breakdown': handler_annual_breakdown,
 }
 

@@ -124,16 +124,22 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
 
     if decision.route in ("BI", "MIXED") and decision.intent:
         try:
-            param_model = INTENT_PARAM_MODELS.get(decision.intent)
+            # Check if this is an annual query that should use quarterly breakdown
+            query_lower = req.message.lower()
+            actual_intent = decision.intent
+            if decision.intent == 'week_in_review' and any(term in query_lower for term in ['2025', '2024', 'year', 'annual', 'ytd', 'revenue for']):
+                actual_intent = 'annual_breakdown'
+            
+            param_model = INTENT_PARAM_MODELS.get(actual_intent)
             raw_params: Dict[str, Any] = {}
             if param_model:
                 try:
                     raw_params = param_model(**{}).model_dump()  # defaults
                 except Exception as e:
-                    logging.warning(f"Parameter model error for {decision.intent}: {e}")
+                    logging.warning(f"Parameter model error for {actual_intent}: {e}")
                     raw_params = {}
             
-            handler = INTENT_HANDLERS[decision.intent]
+            handler = INTENT_HANDLERS[actual_intent]
             bi_result = handler(raw_params, db, org_id)
             # augment with tables (simple heuristic) & refreshed_at placeholder
             bi_result.setdefault("tables", ["analytics_marts.sales_daily"])
