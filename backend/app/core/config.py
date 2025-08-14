@@ -2,7 +2,7 @@ import os
 import socket
 from pathlib import Path
 from typing import List, Union
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import validator
 from dotenv import load_dotenv
 
@@ -15,6 +15,7 @@ except Exception:
     pass
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(extra='ignore', case_sensitive=True, env_file='.env')
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str = os.getenv("SECRET_KEY", "development-secret-key")
     ALGORITHM: str = "HS256"
@@ -37,6 +38,25 @@ class Settings(BaseSettings):
     LLM_MODEL_ID: str = os.getenv("LLM_MODEL_ID", "openai/gpt-oss-20b")
     LLM_TIMEOUT_SECONDS: int = int(os.getenv("LLM_TIMEOUT_SECONDS", "3"))
 
+    # Hybrid Chat / LM Studio specific (Phase 1 scaffold)
+    LMSTUDIO_BASE_URL: str = os.getenv("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1")
+    LMSTUDIO_CHAT_MODEL: str = os.getenv("LMSTUDIO_CHAT_MODEL", "openai/gpt-oss-20b")
+    LMSTUDIO_EMBED_MODEL: str = os.getenv("LMSTUDIO_EMBED_MODEL", "text-embedding-minilm")
+    LMSTUDIO_TIMEOUT: int = int(os.getenv("LMSTUDIO_TIMEOUT", "120"))
+
+    APP_TZ: str = os.getenv("APP_TZ", "Asia/Singapore")
+    FISCAL_CALENDAR_START_MONTH: int = int(os.getenv("FISCAL_CALENDAR_START_MONTH", "1"))  # 1=Jan default
+
+    # RAG configuration (future use)
+    RAG_STORE: str = os.getenv("RAG_STORE", "chroma")  # or pgvector
+    RAG_PERSIST_DIR: str = os.getenv("RAG_PERSIST_DIR", "./chroma_store")
+    RAG_PG_DSN: str = os.getenv("RAG_PG_DSN", "")
+
+    # Feature flags for staged rollout
+    HYBRID_CHAT_ENABLED: bool = bool(int(os.getenv("HYBRID_CHAT_ENABLED", "0")))
+    HYBRID_ROUTER_EMBEDDINGS_ENABLED: bool = bool(int(os.getenv("HYBRID_ROUTER_EMBEDDINGS_ENABLED", "0")))
+    HYBRID_ROUTER_LLM_TIEBREAKER_ENABLED: bool = bool(int(os.getenv("HYBRID_ROUTER_LLM_TIEBREAKER_ENABLED", "0")))
+
     # Alerting / notifications
     ALERT_CRON_TOKEN: str = os.getenv("ALERT_CRON_TOKEN", "dev-cron-token")
     ALERT_EMAIL_FROM: str = os.getenv("ALERT_EMAIL_FROM", "alerts@stockpilot.local")
@@ -55,9 +75,7 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in v.split(",")]
         return v
     
-    class Config:
-        case_sensitive = True
-        env_file = ".env"
+    # (Removed legacy inner Config to avoid conflict with Pydantic v2 model_config)
 
 settings = Settings()
 

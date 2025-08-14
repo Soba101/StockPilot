@@ -73,7 +73,19 @@ async def chat_query(req: ChatQueryRequest, db: Session = Depends(get_db), claim
                 warnings=[]
             )
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}")
+            # Graceful degradation (avoid 500 for frontend): return structured fallback
+            now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
+            return ChatQueryResponse(
+                intent=None,
+                title="StockPilot Assistant",
+                answer_summary="LLM temporarily unavailable. You can still run analytic intents (e.g. 'top margin skus last week').",
+                data={"columns": [], "rows": []},
+                query_explainer=QueryExplainer(definition="Business-aware conversation fallback", sql=None, sources=[]),
+                freshness=FreshnessMeta(generated_at=now_iso, data_fresh_at=None, max_lag_seconds=None),
+                confidence=ConfidenceMeta(level='low', reasons=[f"llm_error:{e}"]),
+                source='llm',
+                warnings=["llm_unavailable"]
+            )
     
     if not resolution.intent:
         raise HTTPException(status_code=400, detail={"error":"intent_unresolved","reasons":resolution.reasons})

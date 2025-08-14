@@ -20,14 +20,90 @@ HandlerFn = Callable[[Dict[str, Any], Session, str], Dict[str, Any]]
 # ---------------- Intent Resolution (rule based) -----------------
 
 INTENT_KEYWORDS = {
-    'top_skus_by_margin': ['top', 'margin', 'sku', 'skus', 'profit', 'best', 'best selling', 'best sale', 'top selling', 'highest', 'most profitable'],
-    'stockout_risk': ['stockout', 'run out', 'risk', 'out of stock', 'low inventory'],
-    'week_in_review': ['week in review', 'last week', 'summary', 'review', 'weekly', 'this week'],
-    'reorder_suggestions': ['reorder', 'suggestion', 'po draft', 'purchase', 'buy', 'order', 'replenish'],
-    'slow_movers': ['slow', 'not selling', "can't move", 'cant move', 'stuck', 'dead stock', 'dead inventory', 'sitting'],
-    'product_detail': ['detail', 'tell me about', 'units sold', 'sales for', 'inventory for', 'stock for', 'how much', 'how many'],
-    'quarterly_forecast': ['quarter', 'quarterly', 'forecast', 'projection', 'expected', 'predict', 'estimate', 'q1', 'q2', 'q3', 'q4']
+    'top_skus_by_margin': [
+        # Core profit/margin terms
+        'top', 'margin', 'sku', 'skus', 'profit', 'profitable', 'profitability',
+        # Best/top performers
+        'best', 'best selling', 'best sale', 'top selling', 'highest', 'most profitable',
+        'top products', 'best products', 'top performers', 'winners', 'top revenue',
+        # Ranking/comparison
+        'ranking', 'rank', 'compare', 'which products', 'what products', 'leading',
+        # Money terms  
+        'money', 'earnings', 'income', 'returns', 'margin analysis'
+    ],
+    'stockout_risk': [
+        # Stockout terms
+        'stockout', 'stock out', 'run out', 'running out', 'risk', 'out of stock', 
+        'low inventory', 'low stock', 'shortage', 'shortages', 'depleted',
+        # Inventory concerns
+        'inventory risk', 'stock risk', 'availability', 'available', 'in stock',
+        'supply', 'replenish', 'restock', 'critical', 'urgent', 'emergency',
+        # Questions about availability
+        'do we have', 'how much left', 'running low', 'almost out'
+    ],
+    'week_in_review': [
+        # Time periods
+        'week in review', 'last week', 'summary', 'review', 'weekly', 'this week',
+        'past week', 'recent', 'lately', 'overview', 'recap',
+        # Sales performance
+        'sales figures', 'total sales', 'revenue', 'sales revenue', 'sales performance', 
+        'sales summary', 'how did we do', 'performance', 'results', 'numbers',
+        # Business metrics
+        'business', 'operations', 'metrics', 'analytics', 'data', 'report',
+        'dashboard', 'insights', 'trends', 'analysis', 'stats', 'statistics'
+    ],
+    'reorder_suggestions': [
+        # Purchasing terms
+        'reorder', 'suggestion', 'suggestions', 'po draft', 'purchase', 'buy', 'order', 
+        'replenish', 'stock up', 'procurement', 'sourcing', 'supplier',
+        # Business decisions
+        'what to order', 'what to buy', 'purchase orders', 'shopping list',
+        'recommendations', 'should I buy', 'need to order', 'ordering',
+        # Planning
+        'planning', 'forecast', 'demand', 'supply planning', 'inventory planning'
+    ],
+    'slow_movers': [
+        # Slow-moving items
+        'slow', 'slow moving', 'not selling', "can't move", 'cant move', 'stuck',
+        'dead stock', 'dead inventory', 'sitting', 'stagnant', 'dormant',
+        # Performance issues
+        'underperforming', 'poor performance', 'low turnover', 'old inventory',
+        'excess', 'surplus', 'overstocked', 'clearance', 'liquidate',
+        # Problem identification
+        'problem', 'issues', 'concerns', 'worst', 'bottom', 'lagging'
+    ],
+    'product_detail': [
+        # Product information
+        'detail', 'details', 'tell me about', 'information', 'info', 'specifics',
+        'units sold', 'sales for', 'inventory for', 'stock for', 'how much', 'how many',
+        # Product queries
+        'product', 'item', 'sku', 'part', 'model', 'about this', 'show me',
+        'lookup', 'find', 'search', 'status', 'current', 'level', 'quantity'
+    ],
+    'quarterly_forecast': [
+        # Time periods
+        'quarter', 'quarterly', 'forecast', 'projection', 'expected', 'predict', 
+        'estimate', 'q1', 'q2', 'q3', 'q4', 'year to date', 'ytd',
+        'annual', 'yearly', '2025', '2024', 'this year', 'last year',
+        # Forecasting terms
+        'future', 'upcoming', 'next quarter', 'next year', 'projections',
+        'budget', 'planning', 'outlook', 'expectations', 'goals', 'targets'
+    ]
 }
+
+# Add comprehensive catch-all business terms that should trigger BI analysis
+BUSINESS_QUERY_INDICATORS = [
+    # Generic business questions
+    'sales', 'revenue', 'profit', 'income', 'earnings', 'money', 'financial',
+    'business', 'performance', 'results', 'numbers', 'data', 'analytics',
+    'metrics', 'kpi', 'dashboard', 'report', 'reporting', 'insights',
+    # Inventory/stock
+    'inventory', 'stock', 'products', 'items', 'skus', 'catalog', 'warehouse',
+    'distribution', 'logistics', 'supply', 'demand', 'turnover', 'velocity',
+    # Operations
+    'operations', 'operational', 'efficiency', 'productivity', 'utilization',
+    'optimization', 'trends', 'patterns', 'analysis', 'statistics', 'stats'
+]
 
 # Mapping needed by chat endpoint to validate params
 INTENT_PARAM_MODELS = {

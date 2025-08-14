@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(docker exec:*)"
+      "Bash(docker exec:*)",
+      "Bash(source:*)",
+      "Bash(conda activate:*)",
+      "Bash(/opt/anaconda3/envs/stockpilot/bin/python ingest/run_ingest.py ../data/)"
     ],
     "deny": []
   },

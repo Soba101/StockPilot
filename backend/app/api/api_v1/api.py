@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.api_v1.endpoints import products, locations, organizations, auth, inventory, analytics, purchasing, reports, internal, chat
+from app.api.api_v1.endpoints import products, locations, organizations, auth, inventory, analytics, purchasing, reports, internal, chat, chat_unified
 
 api_router = APIRouter()
 api_router.include_router(organizations.router, prefix="/organizations", tags=["organizations"])
@@ -12,3 +12,4 @@ api_router.include_router(analytics.router, prefix="/analytics", tags=["analytic
 api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
 api_router.include_router(internal.router, prefix="/internal", tags=["internal"])
 api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
+api_router.include_router(chat_unified.router, prefix="/chat2", tags=["chat-unified"])  # temporary path for hybrid system
