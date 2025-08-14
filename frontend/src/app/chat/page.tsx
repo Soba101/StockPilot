@@ -102,7 +102,7 @@ export default function ChatPage() {
         <CardHeader>
         </CardHeader>
         <CardContent>
-          <div className="h-[520px] md:h-[620px] overflow-y-auto border rounded-md p-3 mb-4 bg-muted/30">
+          <div className="h-[520px] md:h-[1000px] overflow-y-auto border rounded-md p-3 mb-4 bg-muted/30">
             <div className="space-y-3">
               {messages.map((m, i) => (
                 <div key={i} className={`${m.role === 'user' ? 'text-right' : 'text-left'}`}>

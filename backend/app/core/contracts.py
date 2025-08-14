@@ -4,7 +4,7 @@ from jsonschema import Draft7Validator, ValidationError
 UNIFIED_RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
-        "route": {"type": "string", "enum": ["BI", "RAG", "MIXED", "OPEN", "NO_ANSWER"]},
+        "route": {"type": "string", "enum": ["RAG", "OPEN", "NO_ANSWER"]},
         "answer": {"type": "string"},
         "cards": {"type": "array", "items": {"type": "object"}},
         "provenance": {
@@ -37,20 +37,6 @@ UNIFIED_RESPONSE_SCHEMA = {
         "follow_ups": {"type": "array", "items": {"type": "string"}}
     },
     "required": ["route", "answer", "provenance", "confidence", "follow_ups"]
-}
-
-BI_TOOL_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "intent": {"type": "string", "enum": [
-            "top_skus_by_margin","stockout_risk","week_in_review","reorder_suggestions","slow_movers","product_detail","quarterly_forecast"
-        ]},
-        "time_start": {"type": "string", "format": "date-time"},
-        "time_end": {"type": "string", "format": "date-time"},
-        "skus": {"type": "array", "items": {"type": "string"}},
-        "options": {"type": "object"}
-    },
-    "required": ["intent", "time_start", "time_end"]
 }
 
 RAG_SEARCH_SCHEMA = {
