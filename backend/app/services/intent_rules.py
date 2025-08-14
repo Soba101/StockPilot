@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Any, Callable, List, Tuple, cast
+from typing import Dict, Any, Callable, List, Tuple, cast, Optional
 import re
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -13,6 +13,7 @@ from app.schemas.chat import (
     SlowMoversParams,
     ProductDetailParams,
     QuarterlyForecastParams,
+    AnnualBreakdownParams,
 )
 
 HandlerFn = Callable[[Dict[str, Any], Session, str], Dict[str, Any]]
@@ -114,6 +115,7 @@ INTENT_PARAM_MODELS = {
     'slow_movers': SlowMoversParams,
     'product_detail': ProductDetailParams,
     'quarterly_forecast': QuarterlyForecastParams,
+    'annual_breakdown': AnnualBreakdownParams,
 }
 
 PARAM_NORMALIZERS = [
@@ -122,6 +124,7 @@ PARAM_NORMALIZERS = [
     (re.compile(r'today|today\'s|todays', re.I), 'period', lambda _: '1d'),
     (re.compile(r'(?P<n>top ?(\d{1,2}))', re.I), 'n', lambda m: int(re.findall(r'\d+', m.group('n'))[0])),
     (re.compile(r'(?P<hd>(7|14|30)) ?day', re.I), 'horizon_days', lambda m: int(m.group('hd'))),
+    (re.compile(r'(?P<year>20\d{2})', re.I), 'target_year', lambda m: int(m.group('year'))),
 ]
 
 def resolve_intent_rules(prompt: str) -> IntentResolution:
@@ -143,6 +146,13 @@ def resolve_intent_rules(prompt: str) -> IntentResolution:
                 params[key] = fn(m)
             except Exception:
                 pass
+    
+    # Special case: if we have a specific year and annual/revenue keywords, route to annual_breakdown
+    has_year = 'target_year' in params
+    has_annual_keywords = any(kw in p_lower for kw in ['revenue', 'annual', 'yearly', 'year'])
+    if has_year and has_annual_keywords and best_intent == 'quarterly_forecast':
+        best_intent = 'annual_breakdown'
+    
     # Cast best_intent (str) to IntentName type for pydantic model
     return IntentResolution(intent=cast(Any, best_intent), params=params, confidence=min(1.0, 0.4 + 0.2 * best_score), reasons=['keyword match'])
 
@@ -255,10 +265,11 @@ def handler_stockout_risk(params: Dict[str, Any], db: Session, org_id: str) -> D
         "definition": "Products at risk of stocking out within the specified horizon based on recent velocity.",
     }
 
-def handler_annual_breakdown(params: Dict[str, Any], db: Session, org_id: str, target_year: int = None) -> Dict[str, Any]:
+def handler_annual_breakdown(params: Dict[str, Any], db: Session, org_id: str) -> Dict[str, Any]:
     """Enhanced handler for annual revenue queries with quarterly breakdown."""
+    p = AnnualBreakdownParams(**params)
     from datetime import date
-    current_year = target_year or date.today().year
+    current_year = p.target_year or date.today().year
     
     sql = text("""
         WITH quarterly_data AS (
@@ -306,11 +317,11 @@ def handler_annual_breakdown(params: Dict[str, Any], db: Session, org_id: str, t
     data_rows = [{
         "year": int(r.year),
         "quarter": r.quarter,
-        "revenue": float(r.revenue or 0),
-        "units": int(r.units or 0),
-        "margin": float(r.margin or 0),
-        "active_days": int(r.active_days or 0),
-        "margin_percentage": round(float(r.margin_percentage or 0), 1)
+        "revenue": float(r.revenue) if r.revenue is not None else 0.0,
+        "units": int(r.units) if r.units is not None else 0,
+        "margin": float(r.margin) if r.margin is not None else 0.0,
+        "active_days": int(r.active_days) if r.active_days is not None else 0,
+        "margin_percentage": round(float(r.margin_percentage) if r.margin_percentage is not None else 0.0, 1)
     } for r in rows]
     
     return {

@@ -127,6 +127,14 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
             # Check if this is an annual query that should use quarterly breakdown
             query_lower = req.message.lower()
             actual_intent = decision.intent
+            target_year = None
+            
+            # Extract specific year from query
+            import re
+            year_match = re.search(r'20(2[0-9])', req.message)
+            if year_match:
+                target_year = int(year_match.group())
+            
             if decision.intent == 'week_in_review' and any(term in query_lower for term in ['2025', '2024', 'year', 'annual', 'ytd', 'revenue for']):
                 actual_intent = 'annual_breakdown'
             

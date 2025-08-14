@@ -34,7 +34,10 @@ class QuarterlyForecastParams(BaseModel):
     period: Literal['current_quarter', 'next_quarter'] = 'current_quarter'
     metric: Literal['revenue', 'units', 'margin'] = 'revenue'
 
-IntentName = Literal['top_skus_by_margin','stockout_risk','week_in_review','reorder_suggestions','slow_movers','product_detail','quarterly_forecast']
+class AnnualBreakdownParams(BaseModel):
+    target_year: Optional[int] = None
+
+IntentName = Literal['top_skus_by_margin','stockout_risk','week_in_review','reorder_suggestions','slow_movers','product_detail','quarterly_forecast','annual_breakdown']
 
 # Chat request / response
 class ChatQueryRequest(BaseModel):

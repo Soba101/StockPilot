@@ -115,9 +115,11 @@ async def chat_query(req: ChatQueryRequest, db: Session = Depends(get_db), claim
         'top_skus_by_margin': 'Top SKUs by Margin',
         'stockout_risk': 'Stockout Risk Analysis',
         'week_in_review': 'Week in Review',
-    'reorder_suggestions': 'Reorder Suggestions',
-    'slow_movers': 'Slow Moving Inventory',
-    'product_detail': 'Product Detail'
+        'reorder_suggestions': 'Reorder Suggestions',
+        'slow_movers': 'Slow Moving Inventory',
+        'product_detail': 'Product Detail',
+        'quarterly_forecast': 'Quarterly Forecast',
+        'annual_breakdown': 'Annual Business Performance'
     }
     
     # Enhanced summary with business context awareness
@@ -248,4 +250,10 @@ def _summarize(intent: IntentName, payload: dict) -> str:
     if intent == 'slow_movers':
         zero_sold = [r for r in rows if r.get('units_sold_period', 0) == 0]
         return f"{len(rows)} slow movers (including {len(zero_sold)} with zero sales). Top stuck SKU {rows[0]['sku']} with {rows[0]['on_hand']} on hand." if rows else 'No slow movers found.'
+    if intent == 'annual_breakdown':
+        total_revenue = sum(r.get('revenue', 0) for r in rows)
+        total_units = sum(r.get('units', 0) for r in rows)
+        year = rows[0]['year'] if rows else 'Current'
+        return f"{year} Business Performance: ${total_revenue:,.2f} total revenue from {total_units:,} units sold. Strong performance across {len(rows)} active {'quarters' if len(rows) > 1 else 'quarter'}."
+    return f"Data with {len(rows)} results."
     return 'Summary unavailable.'
