@@ -39,6 +39,127 @@ Inventory, purchasing & sales analytics with an event‑sourced inventory core a
 
 ## Architecture & Data Flow
 
+```mermaid
+graph TB
+    %% Frontend Layer
+    subgraph "Frontend (Next.js)"
+        UI[User Interface]
+        RQ[React Query Hooks]
+        API_CLIENT[API Client<br/>src/lib/api.ts]
+        CHAT[AI Chat Interface]
+    end
+
+    %% API Layer
+    subgraph "Backend (FastAPI)"
+        ROUTER[API Router<br/>/api/v1/*]
+        AUTH[JWT Auth<br/>Multi-tenant]
+        CRUD[CRUD Endpoints]
+        ANALYTICS[Analytics Endpoints]
+        CHAT_SVC[Chat Service<br/>Intent Resolution]
+    end
+
+    %% Data Layer
+    subgraph "Data Storage"
+        PG[(PostgreSQL<br/>Core Tables)]
+        REDIS[(Redis<br/>Cache)]
+        EVENTS[(inventory_movements<br/>Event Sourcing)]
+    end
+
+    %% Analytics Layer
+    subgraph "Analytics Pipeline"
+        DBT[dbt Transformations]
+        STAGING[Staging Models]
+        MARTS[Business Marts<br/>sales_daily, etc.]
+    end
+
+    %% External Services
+    OPENAI[OpenAI API<br/>Chat Fallback]
+
+    %% Data Flow
+    UI --> RQ
+    RQ --> API_CLIENT
+    API_CLIENT --> ROUTER
+    CHAT --> CHAT_SVC
+
+    ROUTER --> AUTH
+    AUTH --> CRUD
+    AUTH --> ANALYTICS
+    AUTH --> CHAT_SVC
+
+    CRUD --> PG
+    CRUD --> EVENTS
+    ANALYTICS --> REDIS
+    ANALYTICS --> MARTS
+
+    PG --> DBT
+    EVENTS --> DBT
+    DBT --> STAGING
+    STAGING --> MARTS
+
+    CHAT_SVC --> OPENAI
+    CHAT_SVC --> ANALYTICS
+
+    %% Styling
+    classDef frontend fill:#e1f5fe
+    classDef backend fill:#fff3e0
+    classDef data fill:#f3e5f5
+    classDef analytics fill:#e8f5e8
+    classDef external fill:#ffebee
+
+    class UI,RQ,API_CLIENT,CHAT frontend
+    class ROUTER,AUTH,CRUD,ANALYTICS,CHAT_SVC backend
+    class PG,REDIS,EVENTS data
+    class DBT,STAGING,MARTS analytics
+    class OPENAI external
+```
+
+### System Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Frontend (Next.js)                          │
+│  ┌─────────────┐  ┌──────────────┐  ┌─────────────────────────┐ │
+│  │ User        │  │ React Query  │  │ AI Chat                 │ │
+│  │ Interface   │  │ Hooks        │  │ Interface               │ │
+│  └─────────────┘  └──────────────┘  └─────────────────────────┘ │
+│                           │                     │               │
+└───────────────────────────┼─────────────────────┼───────────────┘
+                            │                     │
+                            ▼                     ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   Backend (FastAPI)                            │
+│  ┌─────────────┐  ┌──────────────┐  ┌─────────────────────────┐ │
+│  │ JWT Auth    │  │ CRUD         │  │ Chat Service            │ │
+│  │ Multi-tenant│  │ Endpoints    │  │ Intent Resolution       │ │
+│  └─────────────┘  └──────────────┘  └─────────────────────────┘ │
+│           │              │                     │               │
+│           ▼              ▼                     ▼               │
+│  ┌─────────────┐  ┌──────────────┐  ┌─────────────────────────┐ │
+│  │ Analytics   │  │ Permissions  │  │ OpenAI Integration      │ │
+│  │ Endpoints   │  │ org_id filter│  │                         │ │
+│  └─────────────┘  └──────────────┘  └─────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Data Layer                                   │
+│  ┌─────────────┐  ┌──────────────┐  ┌─────────────────────────┐ │
+│  │ PostgreSQL  │  │ Redis        │  │ inventory_movements     │ │
+│  │ Core Tables │  │ Cache        │  │ (Event Sourcing)        │ │
+│  └─────────────┘  └──────────────┘  └─────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                Analytics Pipeline (dbt)                        │
+│  ┌─────────────┐  ┌──────────────┐  ┌─────────────────────────┐ │
+│  │ Staging     │  │ Business     │  │ Reports                 │ │
+│  │ Models      │  │ Marts        │  │ (sales_daily, etc.)     │ │
+│  └─────────────┘  └──────────────┘  └─────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Linear Data Flow
 User actions / imports → FastAPI CRUD → PostgreSQL core tables → append‑only `inventory_movements` (event sourcing) → dbt staging & marts (`sales_daily`, etc.) → Analytics & Reports endpoints → React/Next.js (App Router) + React Query → AI Chat assistant surfaces metrics with structured responses.
 
 ### Key Components
