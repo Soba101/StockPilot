@@ -25,8 +25,8 @@ export default function AdjustStockPage() {
   const { isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
   
-  const { data: products } = useProducts();
-  const { data: locations } = useLocations();
+  const { products } = useProducts();
+  const { locations } = useLocations();
   const adjustStockMutation = useAdjustStock();
   
   const [adjustments, setAdjustments] = useState<AdjustmentItem[]>([
@@ -69,7 +69,7 @@ export default function AdjustStockPage() {
     }
   };
 
-  const updateAdjustment = (id: string, field: keyof AdjustmentItem, value: any) => {
+  const updateAdjustment = (id: string, field: keyof AdjustmentItem, value: string | number) => {
     setAdjustments(adjustments.map(adj => {
       if (adj.id === id) {
         const updatedAdj = { ...adj, [field]: value };
