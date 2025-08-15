@@ -223,7 +223,7 @@ export default function ImportProductsPage() {
                 <div><strong>Cost</strong> - Product cost in dollars (optional)</div>
                 <div><strong>Price</strong> - Selling price in dollars (optional)</div>
                 <div><strong>Reorder Point</strong> - Stock level to reorder (optional, defaults to 10)</div>
-                <div><strong>Unit of Measure</strong> - e.g., each, box, kg (optional, defaults to "each")</div>
+                <div><strong>Unit of Measure</strong> - e.g., each, box, kg (optional, defaults to &ldquo;each&rdquo;)</div>
               </div>
             </CardContent>
           </Card>

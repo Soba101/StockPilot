@@ -1,13 +1,11 @@
 'use client'
 
 import Link from 'next/link'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { MessageCircle, ArrowLeft } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { useState } from 'react'
 import { Input } from '@/components/ui/input'
-import { useInventory } from '@/hooks/use-inventory'
-import { useProducts } from '@/hooks/use-products'
 import { useChatQuery } from '@/hooks/use-chat'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -17,20 +15,37 @@ interface Message {
   content: string
 }
 
+interface ChatColumn {
+  name: string
+  type: string
+}
+
+interface ChatData {
+  columns: ChatColumn[]
+  rows: Record<string, unknown>[]
+}
+
+interface ChatResponse {
+  title: string
+  answer_summary: string
+  data?: ChatData
+  confidence: { level: string }
+  source: string
+  query_explainer?: { sql?: string }
+}
+
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: 'Hi! Ask me about inventory, sales, purchasing, or type a question.' },
   ])
   const [input, setInput] = useState('')
-  const { summary: inventorySummary } = useInventory()
-  const { products } = useProducts()
   const chat = useChatQuery()
 
   const renderStructured = (m: Message) => {
     try {
       const marker = '__JSON__'
       if (m.content.startsWith(marker)) {
-        const parsed = JSON.parse(m.content.slice(marker.length))
+        const parsed: ChatResponse = JSON.parse(m.content.slice(marker.length))
         return (
           <div className="space-y-2">
             <div className="font-medium">{parsed.title}</div>
@@ -40,13 +55,13 @@ export default function ChatPage() {
                 <table className="text-xs w-full">
                   <thead className="bg-muted">
                     <tr>
-                      {parsed.data.columns.map((c: any) => <th key={c.name} className="p-1 text-left font-medium">{c.name}</th>)}
+                      {parsed.data.columns.map((c) => <th key={c.name} className="p-1 text-left font-medium">{c.name}</th>)}
                     </tr>
                   </thead>
                   <tbody>
-                    {parsed.data.rows.slice(0,10).map((r: any, i: number) => (
+                    {parsed.data.rows.slice(0,10).map((r, i: number) => (
                       <tr key={i} className="odd:bg-muted/40">
-                        {parsed.data.columns.map((c: any) => <td key={c.name} className="p-1 align-top">{String(r[c.name])}</td>)}
+                        {parsed.data.columns.map((c) => <td key={c.name} className="p-1 align-top">{String(r[c.name])}</td>)}
                       </tr>
                     ))}
                   </tbody>
@@ -116,8 +131,8 @@ export default function ChatPage() {
           const packed = { ...data }
           setMessages(m => [...m, { role: 'assistant', content: '__JSON__' + JSON.stringify(packed) }])
         },
-        onError: (err: any) => {
-          setMessages(m => [...m, { role: 'assistant', content: err?.response?.data?.detail?.error || err.message }])
+        onError: (err: Error) => {
+          setMessages(m => [...m, { role: 'assistant', content: (err as Error & { response?: { data?: { detail?: { error?: string } } } })?.response?.data?.detail?.error || err.message }])
         }
       }
     )
@@ -171,7 +186,7 @@ export default function ChatPage() {
           </div>
           {messages.length === 1 && (
             <div className="text-[10px] text-muted-foreground mt-2">
-              Examples: "top products by margin", "stockout risk", "week in review", "reorder suggestions"
+              Examples: &ldquo;top products by margin&rdquo;, &ldquo;stockout risk&rdquo;, &ldquo;week in review&rdquo;, &ldquo;reorder suggestions&rdquo;
             </div>
           )}
         </CardContent>

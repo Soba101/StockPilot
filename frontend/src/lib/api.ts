@@ -1,4 +1,5 @@
 import axios from 'axios';
+import type { Product, Organization, Location, InventoryMovement, PurchaseOrder } from '@/types';
 
 // Dynamically determine API base URL so the app works when accessed via LAN IP.
 // Priority:
@@ -79,10 +80,10 @@ api.interceptors.response.use(
 export const productsApi = {
   list: () => api.get('/products/'),
   get: (id: string) => api.get(`/products/${id}`),
-  create: (data: any) => api.post('/products/', data),
-  update: (id: string, data: any) => api.put(`/products/${id}`, data),
+  create: (data: Omit<Product, 'id' | 'created_at' | 'updated_at'>) => api.post('/products/', data),
+  update: (id: string, data: Partial<Omit<Product, 'id' | 'created_at' | 'updated_at'>>) => api.put(`/products/${id}`, data),
   delete: (id: string) => api.delete(`/products/${id}`),
-  bulkUpsert: (products: any[]) => api.post('/products/bulk_upsert', { products }),
+  bulkUpsert: (products: Omit<Product, 'id' | 'created_at' | 'updated_at'>[]) => api.post('/products/bulk_upsert', { products }),
   getBySku: (sku: string) => api.get(`/products/sku/${sku}`),
   getByOrg: (orgId: string) => api.get(`/products/organization/${orgId}`),
 };
@@ -90,16 +91,16 @@ export const productsApi = {
 export const organizationsApi = {
   list: () => api.get('/organizations/'),
   get: (id: string) => api.get(`/organizations/${id}`),
-  create: (data: any) => api.post('/organizations/', data),
-  update: (id: string, data: any) => api.put(`/organizations/${id}`, data),
+  create: (data: Omit<Organization, 'id' | 'created_at' | 'updated_at'>) => api.post('/organizations/', data),
+  update: (id: string, data: Partial<Omit<Organization, 'id' | 'created_at' | 'updated_at'>>) => api.put(`/organizations/${id}`, data),
   delete: (id: string) => api.delete(`/organizations/${id}`),
 };
 
 export const locationsApi = {
   list: () => api.get('/locations/'),
   get: (id: string) => api.get(`/locations/${id}`),
-  create: (data: any) => api.post('/locations/', data),
-  update: (id: string, data: any) => api.put(`/locations/${id}`, data),
+  create: (data: Omit<Location, 'id' | 'created_at' | 'updated_at'>) => api.post('/locations/', data),
+  update: (id: string, data: Partial<Omit<Location, 'id' | 'created_at' | 'updated_at'>>) => api.put(`/locations/${id}`, data),
   delete: (id: string) => api.delete(`/locations/${id}`),
   getByOrg: (orgId: string) => api.get(`/locations/organization/${orgId}`),
 };
@@ -138,11 +139,11 @@ export const inventoryApi = {
   },
   getMovement: (id: string) => 
     api.get(`/inventory/movements/${id}`).then(res => res.data),
-  createMovement: (data: any) => 
+  createMovement: (data: Omit<InventoryMovement, 'id' | 'created_at'>) => 
     api.post('/inventory/movements', data).then(res => res.data),
-  adjustStock: (data: { adjustments: any[] }) => 
+  adjustStock: (data: { adjustments: { product_id: string; location_id: string; quantity: number; notes?: string }[] }) => 
     api.post('/inventory/adjust', data).then(res => res.data),
-  transferStock: (data: any) => 
+  transferStock: (data: { product_id: string; from_location_id: string; to_location_id: string; quantity: number; notes?: string }) => 
     api.post('/inventory/transfer', data).then(res => res.data),
 };
 
@@ -224,9 +225,9 @@ export const purchasingApi = {
   },
   getPurchaseOrder: (id: string) => 
     api.get(`/purchasing/purchase-orders/${id}`).then(res => res.data),
-  createPurchaseOrder: (data: any) => 
+  createPurchaseOrder: (data: Omit<PurchaseOrder, 'id' | 'created_at' | 'updated_at'>) => 
     api.post('/purchasing/purchase-orders', data).then(res => res.data),
-  updatePurchaseOrderStatus: (id: string, data: any) => 
+  updatePurchaseOrderStatus: (id: string, data: { status: PurchaseOrder['status'] }) => 
     api.put(`/purchasing/purchase-orders/${id}/status`, data).then(res => res.data),
   deletePurchaseOrder: (id: string) => 
     api.delete(`/purchasing/purchase-orders/${id}`).then(res => res.data),
