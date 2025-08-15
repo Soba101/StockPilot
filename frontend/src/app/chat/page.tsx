@@ -9,6 +9,8 @@ import { Input } from '@/components/ui/input'
 import { useInventory } from '@/hooks/use-inventory'
 import { useProducts } from '@/hooks/use-products'
 import { useChatQuery } from '@/hooks/use-chat'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -61,7 +63,44 @@ export default function ChatPage() {
         )
       }
     } catch {}
-    return m.content
+    
+    // For non-JSON responses, render as markdown
+    return (
+      <div className="prose prose-sm max-w-none">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            // Custom styling for markdown elements
+            p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
+            strong: ({ children }) => <strong className="font-bold text-foreground">{children}</strong>,
+            em: ({ children }) => <em className="italic">{children}</em>,
+            ul: ({ children }) => <ul className="list-disc list-inside mb-3 space-y-1 ml-4">{children}</ul>,
+            ol: ({ children }) => <ol className="list-decimal list-inside mb-3 space-y-1 ml-4">{children}</ol>,
+            li: ({ children }) => <li className="text-sm leading-relaxed">{children}</li>,
+            h1: ({ children }) => <h1 className="text-xl font-bold mb-3 text-foreground">{children}</h1>,
+            h2: ({ children }) => <h2 className="text-lg font-bold mb-3 text-foreground">{children}</h2>,
+            h3: ({ children }) => <h3 className="text-base font-bold mb-2 text-foreground">{children}</h3>,
+            h4: ({ children }) => <h4 className="text-sm font-bold mb-2 text-foreground">{children}</h4>,
+            code: ({ children }) => <code className="bg-muted px-1.5 py-0.5 rounded text-xs font-mono">{children}</code>,
+            pre: ({ children }) => <pre className="bg-muted p-3 rounded text-xs overflow-x-auto font-mono">{children}</pre>,
+            table: ({ children }) => (
+              <div className="overflow-x-auto my-4">
+                <table className="w-full border-collapse border border-border text-sm">
+                  {children}
+                </table>
+              </div>
+            ),
+            thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
+            th: ({ children }) => <th className="border border-border p-2 font-semibold text-left">{children}</th>,
+            td: ({ children }) => <td className="border border-border p-2">{children}</td>,
+            tr: ({ children }) => <tr className="even:bg-muted/20">{children}</tr>,
+            blockquote: ({ children }) => <blockquote className="border-l-4 border-primary pl-4 py-2 my-3 bg-muted/30 italic">{children}</blockquote>,
+          }}
+        >
+          {m.content}
+        </ReactMarkdown>
+      </div>
+    )
   }
 
   const send = async () => {
