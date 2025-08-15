@@ -3,9 +3,11 @@ const nextConfig = {
   // Keep it simple: just localhost and the primary LAN IP you asked for.
   allowedDevOrigins: ['localhost', '192.168.18.70'],
   async rewrites() {
-    // Try to determine if we should use localhost or LAN IP for backend
-    // In development, support both localhost and LAN access
-    const backendHost = process.env.BACKEND_HOST || 'localhost';
+    // Always use localhost for backend since it's running locally
+    // The Next.js rewrite will proxy requests regardless of how frontend is accessed
+    const backendHost = 'localhost';
+    
+    console.log(`🔧 Next.js rewrite configured: /api/* -> http://${backendHost}:8000/api/v1/*`);
     
     return [
       {
