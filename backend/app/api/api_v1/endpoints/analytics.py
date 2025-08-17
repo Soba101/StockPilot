@@ -328,7 +328,7 @@ def get_analytics(
 def get_sales_analytics(
     start_date: Optional[date] = Query(None, description="Start date for analysis"),
     end_date: Optional[date] = Query(None, description="End date for analysis"),
-    days: int = Query(30, ge=1, le=90, description="Number of days to analyze (if dates not provided)"),
+    days: int = Query(30, ge=1, le=365, description="Number of days to analyze (if dates not provided)"),
     channel: Optional[str] = Query(None, description="Filter by sales channel"),
     product_category: Optional[str] = Query(None, description="Filter by product category"),
     db: Session = Depends(get_db),
