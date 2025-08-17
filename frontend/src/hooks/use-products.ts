@@ -29,11 +29,18 @@ export function useProducts() {
 }
 
 export function useProduct(id: string) {
-  return useQuery<Product, Error>({
+  const query = useQuery<Product, Error>({
     queryKey: ['products', id],
     queryFn: () => productsApi.get(id).then(res => res.data),
     enabled: !!id,
   });
+
+  return {
+    product: query.data,
+    loading: query.isLoading,
+    error: query.error?.message,
+    refetch: query.refetch,
+  };
 }
 
 export function useCreateProduct() {
