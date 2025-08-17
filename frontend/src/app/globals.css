@@ -32,6 +32,22 @@
   --ring: 222.2 84% 4.9%;
 
   --radius: 0.5rem;
+
+  /* Inventory-specific colors */
+  --success: 142.1 76.2% 36.3%;
+  --success-foreground: 355.7 100% 97.3%;
+  
+  --warning: 47.9 95.8% 53.1%;
+  --warning-foreground: 26 83.3% 14.1%;
+  
+  --info: 198.6 88.7% 48.4%;
+  --info-foreground: 210 40% 98%;
+  
+  /* Stock level colors */
+  --stock-high: 142.1 76.2% 36.3%;
+  --stock-medium: 47.9 95.8% 53.1%;
+  --stock-low: 24.6 95% 53.1%;
+  --stock-out: 0 84.2% 60.2%;
 }
 
 .dark {
@@ -62,6 +78,22 @@
   --border: 217.2 32.6% 17.5%;
   --input: 217.2 32.6% 17.5%;
   --ring: 212.7 26.8% 83.9%;
+
+  /* Dark mode inventory colors */
+  --success: 142.1 70.6% 45.3%;
+  --success-foreground: 144.9 80.4% 10%;
+  
+  --warning: 47.9 95.8% 53.1%;
+  --warning-foreground: 26 83.3% 14.1%;
+  
+  --info: 198.6 88.7% 48.4%;
+  --info-foreground: 210 40% 98%;
+  
+  /* Dark mode stock level colors */
+  --stock-high: 142.1 70.6% 45.3%;
+  --stock-medium: 47.9 95.8% 53.1%;
+  --stock-low: 24.6 95% 53.1%;
+  --stock-out: 0 62.8% 30.6%;
 }
 
 * {
