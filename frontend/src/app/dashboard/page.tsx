@@ -1,21 +1,24 @@
 'use client';
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { useDashboard } from '@/hooks/use-dashboard';
 import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { AlertTriangle, Package, TrendingUp, DollarSign, Activity, ShoppingCart, RefreshCw } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { AlertTriangle, Package, TrendingUp, DollarSign, Activity, ShoppingCart, RefreshCw, Calendar } from 'lucide-react';
+import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
+import { SalesTrendChart } from '@/components/charts/sales-trend-chart';
+import { DashboardSkeleton } from '@/components/dashboard/dashboard-skeleton';
+import { KPICard } from '@/components/dashboard/kpi-card';
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
 export default function DashboardPage() {
   const { isAuthenticated, isLoading } = useAuth();
-  const { stats, loading: dashboardLoading, error, refetch } = useDashboard();
   const router = useRouter();
+  const [timePeriod, setTimePeriod] = useState(30);
+  const { stats, loading: dashboardLoading, error, refetch } = useDashboard(timePeriod);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -23,22 +26,23 @@ export default function DashboardPage() {
     }
   }, [isAuthenticated, isLoading, router]);
 
-  // Use stats from useDashboard hook instead of calculating metrics
+  // Use stats from enhanced dashboard hook with fallback
   const metrics = stats || {
     totalProducts: 0,
     lowStockCount: 0,
     outOfStockCount: 0,
     totalValue: 0,
     topCategories: [],
-    recentActivity: []
+    recentActivity: [],
+    trends: {
+      revenue: { current: 0, previous: 0, direction: 'neutral' as const, percentage: 0 },
+      units: { current: 0, previous: 0, direction: 'neutral' as const, percentage: 0 },
+      orders: { current: 0, previous: 0, direction: 'neutral' as const, percentage: 0 },
+    }
   };
 
   if (isLoading || dashboardLoading) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="text-center">Loading dashboard...</div>
-      </div>
-    );
+    return <DashboardSkeleton />;
   }
 
   if (!isAuthenticated) {
@@ -59,70 +63,83 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
+      <div className="space-y-4 sm:space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Dashboard</h1>
-          <p className="text-muted-foreground">Welcome to your inventory management dashboard</p>
+          <h1 className="text-2xl sm:text-3xl font-bold">Dashboard</h1>
+          <p className="text-muted-foreground text-sm sm:text-base">Welcome to your inventory management dashboard</p>
         </div>
-        <Button 
-          onClick={refetch} 
-          disabled={dashboardLoading}
-          variant="outline"
-          size="sm"
-          className="flex items-center gap-2"
-        >
-          <RefreshCw className={`h-4 w-4 ${dashboardLoading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+          <div className="inline-flex rounded-md border overflow-hidden">
+            {[7, 30, 90].map((days) => (
+              <Button
+                key={days}
+                size="sm"
+                variant={timePeriod === days ? 'default' : 'ghost'}
+                className="rounded-none"
+                onClick={() => setTimePeriod(days)}
+              >
+                <Calendar className="h-4 w-4 mr-2" />
+                {days}d
+              </Button>
+            ))}
+          </div>
+          <Button 
+            onClick={refetch} 
+            disabled={dashboardLoading}
+            variant="outline"
+            size="sm"
+            className="flex items-center gap-2 w-full sm:w-auto"
+          >
+            <RefreshCw className={`h-4 w-4 ${dashboardLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Products</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{metrics.totalProducts.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground">Active in inventory</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Low Stock Items</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-yellow-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">{metrics.lowStockCount}</div>
-            <p className="text-xs text-muted-foreground">Need reordering soon</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Out of Stock</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-red-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-red-600">{metrics.outOfStockCount}</div>
-            <p className="text-xs text-muted-foreground">Immediate attention needed</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Inventory Value</CardTitle>
-            <DollarSign className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">${metrics.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-            <p className="text-xs text-muted-foreground">Current inventory worth</p>
-          </CardContent>
-        </Card>
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+        <KPICard
+          title="Total Revenue"
+          value={`$${metrics.trends?.revenue.current.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}`}
+          description={`Last ${timePeriod} days`}
+          icon={DollarSign}
+          trend={metrics.trends?.revenue ? {
+            value: metrics.trends.revenue.percentage,
+            label: `vs prev ${timePeriod}d`,
+            direction: metrics.trends.revenue.direction
+          } : undefined}
+        />
+        <KPICard
+          title="Units Sold"
+          value={metrics.trends?.units.current || 0}
+          description={`Last ${timePeriod} days`}
+          icon={Package}
+          trend={metrics.trends?.units ? {
+            value: metrics.trends.units.percentage,
+            label: `vs prev ${timePeriod}d`,
+            direction: metrics.trends.units.direction
+          } : undefined}
+        />
+        <KPICard
+          title="Low Stock Items"
+          value={metrics.lowStockCount}
+          description="Need reordering soon"
+          icon={AlertTriangle}
+        />
+        <KPICard
+          title="Out of Stock"
+          value={metrics.outOfStockCount}
+          description="Immediate attention needed"
+          icon={AlertTriangle}
+        />
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
+      {/* Sales Trend Chart */}
+      <SalesTrendChart days={timePeriod} className="w-full" />
+
+      <div className="grid gap-6 grid-cols-1 lg:grid-cols-2">
         {/* Category Distribution Chart */}
         <Card>
           <CardHeader>
@@ -188,7 +205,7 @@ export default function DashboardPage() {
           <CardDescription>Common tasks to help you manage your inventory</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
             <Button asChild>
               <Link href="/products/new">
                 <Package className="mr-2 h-4 w-4" />
@@ -228,7 +245,7 @@ export default function DashboardPage() {
             <CardDescription>Items that need immediate attention</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
               <div className="flex items-center justify-between p-4 border rounded-lg">
                 <div>
                   <p className="text-sm font-medium text-red-600">Out of Stock</p>

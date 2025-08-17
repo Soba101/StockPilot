@@ -14,7 +14,6 @@ import { ArrowLeft, Plus, Trash2, Save } from 'lucide-react';
 import { useProducts } from '@/hooks/use-products';
 import { useLocations } from '@/hooks/use-locations';
 import { useAdjustStock, type StockAdjustment } from '@/hooks/use-inventory';
-import { toast } from 'sonner';
 
 interface AdjustmentItem extends StockAdjustment {
   id: string;
@@ -26,8 +25,8 @@ export default function AdjustStockPage() {
   const { isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
   
-  const { data: products } = useProducts();
-  const { data: locations } = useLocations();
+  const { products } = useProducts();
+  const { locations } = useLocations();
   const adjustStockMutation = useAdjustStock();
   
   const [adjustments, setAdjustments] = useState<AdjustmentItem[]>([
@@ -70,7 +69,7 @@ export default function AdjustStockPage() {
     }
   };
 
-  const updateAdjustment = (id: string, field: keyof AdjustmentItem, value: any) => {
+  const updateAdjustment = (id: string, field: keyof AdjustmentItem, value: string | number) => {
     setAdjustments(adjustments.map(adj => {
       if (adj.id === id) {
         const updatedAdj = { ...adj, [field]: value };
@@ -98,7 +97,7 @@ export default function AdjustStockPage() {
     );
 
     if (validAdjustments.length === 0) {
-      toast.error('Please fill in at least one complete adjustment');
+      alert('Please fill in at least one complete adjustment');
       return;
     }
 
@@ -114,10 +113,10 @@ export default function AdjustStockPage() {
         })),
       });
 
-      toast.success(`Successfully adjusted stock for ${validAdjustments.length} items`);
+      alert(`Successfully adjusted stock for ${validAdjustments.length} items`);
       router.push('/inventory');
     } catch (error) {
-      toast.error('Failed to adjust stock. Please try again.');
+      alert('Failed to adjust stock. Please try again.');
       console.error('Stock adjustment error:', error);
     } finally {
       setIsSubmitting(false);

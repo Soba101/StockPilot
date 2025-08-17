@@ -5,9 +5,15 @@
       "Bash(source:*)",
       "Bash(conda activate:*)",
       "Bash(/opt/anaconda3/envs/stockpilot/bin/python ingest/run_ingest.py ../data/)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "mcp__puppeteer__puppeteer_click",
+      "mcp__puppeteer__puppeteer_screenshot",
+      "mcp__puppeteer__puppeteer_fill",
+      "mcp__puppeteer__puppeteer_navigate",
+      "mcp__puppeteer__puppeteer_evaluate"
     ],
     "deny": []
   },
-  "enableAllProjectMcpServers": false
+  "enableAllProjectMcpServers": false,
+  "outputStyle": "default"
 }

@@ -33,9 +33,19 @@ def read_products(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)
 def read_products_no_slash(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), claims = Depends(get_current_claims)):
     return read_products(skip=skip, limit=limit, db=db, claims=claims)
 
+# Also provide POST without trailing slash to handle both /products and /products/
+@router.post("", response_model=schemas.Product, include_in_schema=False)
+def create_product_no_slash(
+    product: schemas.ProductCreate,
+    db: Session = Depends(get_db),
+    claims = Depends(require_role("admin")),
+):
+    return create_product(product=product, db=db, claims=claims)
+
 @router.get("/{product_id}", response_model=schemas.Product)
-def read_product(product_id: str, db: Session = Depends(get_db)):
-    product = db.query(Product).filter(Product.id == product_id).first()
+def read_product(product_id: str, db: Session = Depends(get_db), claims = Depends(get_current_claims)):
+    org_id = claims.get("org")
+    product = db.query(Product).filter(Product.id == product_id, Product.org_id == org_id).first()
     if product is None:
         raise HTTPException(status_code=404, detail="Product not found")
     return product

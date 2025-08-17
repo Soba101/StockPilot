@@ -20,7 +20,7 @@ export default function MovementsPage() {
   const [filters, setFilters] = useState({
     productId: '',
     locationId: '',
-    movementType: '',
+    movementType: 'all',
     startDate: '',
     endDate: '',
   });
@@ -29,6 +29,7 @@ export default function MovementsPage() {
   
   const { data: movements, isLoading: movementsLoading, error, refetch } = useInventoryMovements({
     ...filters,
+    movementType: filters.movementType === 'all' ? undefined : filters.movementType,
     skip: 0,
     limit: 100,
   });
@@ -138,7 +139,7 @@ export default function MovementsPage() {
                 <SelectValue placeholder="Movement Type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Types</SelectItem>
+                <SelectItem value="all">All Types</SelectItem>
                 <SelectItem value="in">Stock In</SelectItem>
                 <SelectItem value="out">Stock Out</SelectItem>
                 <SelectItem value="adjust">Adjustment</SelectItem>

@@ -22,9 +22,13 @@ pytest -m crud                  # CRUD tests only
 ```bash
 cd frontend
 npm install
-npm run dev       # Development server
+npm run dev       # Development server (port 3000)
 npm run build     # Production build
+npm run start     # Production server
 npm run lint      # ESLint check
+
+# For LAN access (when using 192.168.18.70:3000)
+BACKEND_HOST=192.168.18.70 npm run dev
 ```
 
 ### dbt Analytics Pipeline
@@ -145,7 +149,8 @@ The purchase suggestions system uses velocity forecasting with supplier constrai
 
 ## Environment Variables
 
-Key backend environment variables in `.env`:
+### Backend Environment Variables
+Create `.env` in project root:
 
 ```env
 DATABASE_URL=postgresql://stockpilot:stockpilot_dev@localhost:5432/stockpilot
@@ -153,7 +158,24 @@ SECRET_KEY=your-jwt-secret
 OPENAI_API_KEY=your-openai-key
 CHAT_ENABLED=1
 ALERT_CRON_TOKEN=dev-cron-token
+REDIS_URL=redis://localhost:6379/0
 ```
+
+### Frontend Environment Variables  
+Create `frontend/.env.local` for development:
+
+```env
+# Backend host for API rewrites
+# Use 'localhost' for local development, '192.168.18.70' for LAN access
+BACKEND_HOST=localhost
+
+# Optional: Override API base URL completely
+# NEXT_PUBLIC_API_BASE=http://192.168.18.70:8000/api/v1
+```
+
+The frontend automatically detects the access method:
+- `localhost:3000` → uses Next.js rewrites to backend
+- `192.168.18.70:3000` → direct API calls to `192.168.18.70:8000/api/v1` (unless `BACKEND_HOST` is set)
 
 ## Testing Strategy
 
@@ -193,3 +215,15 @@ frontend/
 3. **Prefer mart queries with fallbacks** - maintains functionality when dbt isn't built
 4. **Use existing hooks in chat responses** - avoid duplicating data fetching logic
 5. **Test with integration tests** - they catch multi-tenancy and auth issues
+6. **Frontend API access** - When accessing via LAN IP, set `BACKEND_HOST` environment variable for proper API routing
+7. **API endpoint trailing slashes** - Backend routes require trailing slashes (`/api/v1/products/` not `/api/v1/products`)
+
+## Development Setup for LAN Access
+
+When developing on LAN (e.g., `192.168.18.70:3000`):
+
+1. Set frontend environment: `BACKEND_HOST=192.168.18.70 npm run dev`
+2. Ensure backend is accessible on the LAN IP
+3. Next.js rewrites will route `/api/*` → `http://192.168.18.70:8000/api/v1/*`
+
+This allows seamless switching between localhost and LAN development without code changes.

@@ -1,18 +1,37 @@
 'use client'
 
 import Link from 'next/link'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { MessageCircle, ArrowLeft } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { useState } from 'react'
 import { Input } from '@/components/ui/input'
-import { useInventory } from '@/hooks/use-inventory'
-import { useProducts } from '@/hooks/use-products'
 import { useChatQuery } from '@/hooks/use-chat'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 interface Message {
   role: 'user' | 'assistant'
   content: string
+}
+
+interface ChatColumn {
+  name: string
+  type: string
+}
+
+interface ChatData {
+  columns: ChatColumn[]
+  rows: Record<string, unknown>[]
+}
+
+interface ChatResponse {
+  title: string
+  answer_summary: string
+  data?: ChatData
+  confidence: { level: string }
+  source: string
+  query_explainer?: { sql?: string }
 }
 
 export default function ChatPage() {
@@ -20,15 +39,13 @@ export default function ChatPage() {
     { role: 'assistant', content: 'Hi! Ask me about inventory, sales, purchasing, or type a question.' },
   ])
   const [input, setInput] = useState('')
-  const { summary: inventorySummary } = useInventory()
-  const { products } = useProducts()
   const chat = useChatQuery()
 
   const renderStructured = (m: Message) => {
     try {
       const marker = '__JSON__'
       if (m.content.startsWith(marker)) {
-        const parsed = JSON.parse(m.content.slice(marker.length))
+        const parsed: ChatResponse = JSON.parse(m.content.slice(marker.length))
         return (
           <div className="space-y-2">
             <div className="font-medium">{parsed.title}</div>
@@ -38,13 +55,13 @@ export default function ChatPage() {
                 <table className="text-xs w-full">
                   <thead className="bg-muted">
                     <tr>
-                      {parsed.data.columns.map((c: any) => <th key={c.name} className="p-1 text-left font-medium">{c.name}</th>)}
+                      {parsed.data.columns.map((c) => <th key={c.name} className="p-1 text-left font-medium">{c.name}</th>)}
                     </tr>
                   </thead>
                   <tbody>
-                    {parsed.data.rows.slice(0,10).map((r: any, i: number) => (
+                    {parsed.data.rows.slice(0,10).map((r, i: number) => (
                       <tr key={i} className="odd:bg-muted/40">
-                        {parsed.data.columns.map((c: any) => <td key={c.name} className="p-1 align-top">{String(r[c.name])}</td>)}
+                        {parsed.data.columns.map((c) => <td key={c.name} className="p-1 align-top">{String(r[c.name])}</td>)}
                       </tr>
                     ))}
                   </tbody>
@@ -61,7 +78,44 @@ export default function ChatPage() {
         )
       }
     } catch {}
-    return m.content
+    
+    // For non-JSON responses, render as markdown
+    return (
+      <div className="prose prose-sm max-w-none">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            // Custom styling for markdown elements
+            p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
+            strong: ({ children }) => <strong className="font-bold text-foreground">{children}</strong>,
+            em: ({ children }) => <em className="italic">{children}</em>,
+            ul: ({ children }) => <ul className="list-disc list-inside mb-3 space-y-1 ml-4">{children}</ul>,
+            ol: ({ children }) => <ol className="list-decimal list-inside mb-3 space-y-1 ml-4">{children}</ol>,
+            li: ({ children }) => <li className="text-sm leading-relaxed">{children}</li>,
+            h1: ({ children }) => <h1 className="text-xl font-bold mb-3 text-foreground">{children}</h1>,
+            h2: ({ children }) => <h2 className="text-lg font-bold mb-3 text-foreground">{children}</h2>,
+            h3: ({ children }) => <h3 className="text-base font-bold mb-2 text-foreground">{children}</h3>,
+            h4: ({ children }) => <h4 className="text-sm font-bold mb-2 text-foreground">{children}</h4>,
+            code: ({ children }) => <code className="bg-muted px-1.5 py-0.5 rounded text-xs font-mono">{children}</code>,
+            pre: ({ children }) => <pre className="bg-muted p-3 rounded text-xs overflow-x-auto font-mono">{children}</pre>,
+            table: ({ children }) => (
+              <div className="overflow-x-auto my-4">
+                <table className="w-full border-collapse border border-border text-sm">
+                  {children}
+                </table>
+              </div>
+            ),
+            thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
+            th: ({ children }) => <th className="border border-border p-2 font-semibold text-left">{children}</th>,
+            td: ({ children }) => <td className="border border-border p-2">{children}</td>,
+            tr: ({ children }) => <tr className="even:bg-muted/20">{children}</tr>,
+            blockquote: ({ children }) => <blockquote className="border-l-4 border-primary pl-4 py-2 my-3 bg-muted/30 italic">{children}</blockquote>,
+          }}
+        >
+          {m.content}
+        </ReactMarkdown>
+      </div>
+    )
   }
 
   const send = async () => {
@@ -77,8 +131,8 @@ export default function ChatPage() {
           const packed = { ...data }
           setMessages(m => [...m, { role: 'assistant', content: '__JSON__' + JSON.stringify(packed) }])
         },
-        onError: (err: any) => {
-          setMessages(m => [...m, { role: 'assistant', content: err?.response?.data?.detail?.error || err.message }])
+        onError: (err: Error) => {
+          setMessages(m => [...m, { role: 'assistant', content: (err as Error & { response?: { data?: { detail?: { error?: string } } } })?.response?.data?.detail?.error || err.message }])
         }
       }
     )
@@ -102,7 +156,7 @@ export default function ChatPage() {
         <CardHeader>
         </CardHeader>
         <CardContent>
-          <div className="h-[520px] md:h-[620px] overflow-y-auto border rounded-md p-3 mb-4 bg-muted/30">
+          <div className="h-[520px] md:h-[1000px] overflow-y-auto border rounded-md p-3 mb-4 bg-muted/30">
             <div className="space-y-3">
               {messages.map((m, i) => (
                 <div key={i} className={`${m.role === 'user' ? 'text-right' : 'text-left'}`}>
@@ -132,7 +186,7 @@ export default function ChatPage() {
           </div>
           {messages.length === 1 && (
             <div className="text-[10px] text-muted-foreground mt-2">
-              Examples: "top products by margin", "stockout risk", "week in review", "reorder suggestions"
+              Examples: &ldquo;top products by margin&rdquo;, &ldquo;stockout risk&rdquo;, &ldquo;week in review&rdquo;, &ldquo;reorder suggestions&rdquo;
             </div>
           )}
         </CardContent>
