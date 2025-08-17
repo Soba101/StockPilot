@@ -29,6 +29,7 @@ Inventory, purchasing & sales analytics with an event‑sourced inventory core a
    cd ../../frontend
    npm install
    npm run dev
+   
    ```
 
 3. Access
