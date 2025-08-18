@@ -208,6 +208,70 @@ export const analyticsApi = {
     api.get(`/analytics/stockout-risk?days=${days}`).then(res => res.data),
 };
 
+export const usersApi = {
+  list: (filters?: {
+    status?: string;
+    role?: string;
+    skip?: number;
+    limit?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (filters?.status) params.append('status', filters.status);
+    if (filters?.role) params.append('role', filters.role);
+    if (filters?.skip) params.append('skip', filters.skip.toString());
+    if (filters?.limit) params.append('limit', filters.limit.toString());
+    
+    return api.get(`/settings/users?${params.toString()}`).then(res => res.data);
+  },
+  get: (id: string) => api.get(`/settings/users/${id}`).then(res => res.data),
+  create: (data: {
+    email: string;
+    firstName: string;
+    lastName: string;
+    role: string;
+    status?: 'active' | 'inactive' | 'pending' | 'suspended';
+  }) => api.post('/settings/users', data).then(res => res.data),
+  update: (id: string, data: {
+    firstName?: string;
+    lastName?: string;
+    role?: string;
+    status?: 'active' | 'inactive' | 'pending' | 'suspended';
+  }) => api.put(`/settings/users/${id}`, data).then(res => res.data),
+  delete: (id: string) => api.delete(`/settings/users/${id}`).then(res => res.data),
+  bulkUpdateStatus: (userIds: string[], status: 'active' | 'inactive' | 'suspended') => 
+    api.post('/settings/users/bulk-status', { user_ids: userIds, status }).then(res => res.data),
+  invite: (data: {
+    email: string;
+    firstName: string;
+    lastName: string;
+    role: string;
+  }) => api.post('/settings/users/invite', data).then(res => res.data),
+};
+
+export const rolesApi = {
+  list: () => api.get('/settings/roles').then(res => res.data),
+  get: (id: string) => api.get(`/settings/roles/${id}`).then(res => res.data),
+  create: (data: {
+    name: string;
+    description: string;
+    permissions: string[];
+  }) => api.post('/settings/roles', data).then(res => res.data),
+  update: (id: string, data: {
+    name?: string;
+    description?: string;
+    permissions?: string[];
+  }) => api.put(`/settings/roles/${id}`, data).then(res => res.data),
+  delete: (id: string) => api.delete(`/settings/roles/${id}`).then(res => res.data),
+};
+
+export const permissionsApi = {
+  list: () => api.get('/settings/permissions').then(res => res.data),
+  getByCategory: (category?: string) => {
+    const params = category ? `?category=${category}` : '';
+    return api.get(`/settings/permissions${params}`).then(res => res.data);
+  },
+};
+
 export const purchasingApi = {
   getPurchaseOrders: (filters?: {
     status?: string;
