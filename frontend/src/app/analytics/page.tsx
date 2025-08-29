@@ -1,6 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { useAuth } from '@/contexts/auth-context'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -29,15 +31,38 @@ import { useSalesAnalytics } from '@/hooks/use-sales-analytics'
 import { useStockoutRisk } from '@/hooks/use-stockout-risk'
 
 export default function AnalyticsPage() {
+  const { isAuthenticated, isLoading } = useAuth()
+  const router = useRouter()
+  
   // UI state: date range & filters
   const [rangeDays, setRangeDays] = useState<7 | 30 | 90>(30)
   const [showFilters, setShowFilters] = useState(false)
-  const [selectedChannels, setSelectedChannels] = useState<string[]>(['Online', 'POS', 'Phone'])
+  const [selectedChannels, setSelectedChannels] = useState<string[]>(['Online', 'POS', 'Phone', 'b2b_portal'])
 
   // Fetch real analytics data
   const { data: analytics, loading, error, refetch } = useAnalytics(rangeDays)
   const { data: salesAnalytics } = useSalesAnalytics(rangeDays)
   const { data: stockoutRisk } = useStockoutRisk(rangeDays)
+
+  // Auth guard
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      router.push('/login')
+    }
+  }, [isAuthenticated, isLoading, router])
+
+  // Return loading or null while checking auth
+  if (isLoading) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="text-center">Loading...</div>
+      </div>
+    )
+  }
+
+  if (!isAuthenticated) {
+    return null
+  }
 
   const toggleChannel = (ch: string) => {
     setSelectedChannels((prev) =>
@@ -116,7 +141,7 @@ export default function AnalyticsPage() {
           <CardContent>
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm text-muted-foreground mr-2">Channels:</span>
-              {['Online', 'POS', 'Phone'].map((ch) => (
+              {['Online', 'POS', 'Phone', 'b2b_portal'].map((ch) => (
                 <Button
                   key={ch}
                   size="sm"

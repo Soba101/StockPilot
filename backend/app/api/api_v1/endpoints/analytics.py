@@ -153,7 +153,7 @@ def get_analytics(
             
     except Exception:
         # Fall back to original method if mart is not available
-        fulfilled_orders = [o for o in orders if o.status == 'fulfilled']
+        fulfilled_orders = [o for o in orders if o.status == 'completed']
         total_revenue = sum(float(order.total_amount or 0) for order in fulfilled_orders)
         total_orders = len(fulfilled_orders)
         avg_order_value = total_revenue / total_orders if total_orders > 0 else 0
@@ -161,7 +161,7 @@ def get_analytics(
         # Get order items for units calculation
         order_items = db.query(OrderItem).join(Order).filter(
             Order.org_id == org_id,
-            Order.status == 'fulfilled'
+            Order.status == 'completed'
         ).all()
         
         total_units = sum(item.quantity for item in order_items)
@@ -185,7 +185,7 @@ def get_analytics(
         Product.price
     ).select_from(Product).join(OrderItem, Product.id == OrderItem.product_id).join(Order, OrderItem.order_id == Order.id).filter(
         Order.org_id == org_id,
-        Order.status == 'fulfilled'
+        Order.status == 'completed'
     ).group_by(Product.id, Product.name, Product.sku, Product.cost, Product.price).order_by(
         desc('total_revenue')
     ).limit(5).all()
@@ -211,7 +211,7 @@ def get_analytics(
         func.sum(OrderItem.quantity * OrderItem.unit_price).label('revenue')
     ).select_from(Product).join(OrderItem, Product.id == OrderItem.product_id).join(Order, OrderItem.order_id == Order.id).filter(
         Order.org_id == org_id,
-        Order.status == 'fulfilled',
+        Order.status == 'completed',
         Product.category.isnot(None)
     ).group_by(Product.category).all()
     
@@ -239,7 +239,7 @@ def get_analytics(
         Order.channel
     ).select_from(Order).join(OrderItem, Order.id == OrderItem.order_id).join(Product, OrderItem.product_id == Product.id).filter(
         Order.org_id == org_id,
-        Order.status == 'fulfilled'
+        Order.status == 'completed'
     ).order_by(desc(Order.ordered_at)).limit(10).all()
     
     recent_sales = []
@@ -284,13 +284,13 @@ def get_analytics(
             
     except Exception:
         # Fall back to original method
-        fulfilled_orders = [o for o in orders if o.status == 'fulfilled']
-        if fulfilled_orders:
+        completed_orders = [o for o in orders if o.status == 'completed']
+        if completed_orders:
             # Group orders by date
             from collections import defaultdict
             daily_revenue = defaultdict(float)
             
-            for order in fulfilled_orders:
+            for order in completed_orders:
                 if order.ordered_at:
                     date_str = order.ordered_at.strftime('%m-%d')
                     daily_revenue[date_str] += float(order.total_amount or 0)

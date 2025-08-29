@@ -1,6 +1,8 @@
 'use client'
 
 import * as React from 'react'
+import { useRouter } from 'next/navigation'
+import { useAuth } from '@/contexts/auth-context'
 import { SettingsLayout, defaultSettingsSections } from '@/components/settings/SettingsLayout'
 import { OrganizationSettings } from '@/components/settings/OrganizationSettings'
 import { UserManagement } from '@/components/settings/UserManagement'
@@ -11,9 +13,32 @@ import { IntegrationSettings } from '@/components/settings/IntegrationSettings'
 import { AppearanceSettings } from '@/components/settings/AppearanceSettings'
 
 export default function SettingsPage() {
+  const router = useRouter()
+  const { isAuthenticated, isLoading } = useAuth()
   const [currentSection, setCurrentSection] = React.useState('organization')
   const [saveStatus, setSaveStatus] = React.useState<"idle" | "saving" | "saved" | "error">("idle")
   const [lastSaved, setLastSaved] = React.useState<Date>()
+
+  // Auth protection
+  React.useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      router.push('/login')
+    }
+  }, [isAuthenticated, isLoading, router])
+
+  // Show loading while checking auth
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
+      </div>
+    )
+  }
+
+  // Don't render if not authenticated
+  if (!isAuthenticated) {
+    return null
+  }
 
   const handleSectionChange = (section: string) => {
     setCurrentSection(section)
