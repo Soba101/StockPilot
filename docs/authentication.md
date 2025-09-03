@@ -23,7 +23,7 @@ Most TechFlow users use individual passwords based on the pattern: `password123_
 
 | Email | Role | Organization | Password (Plain) |
 |-------|------|--------------|------------------|
-| `admin@admin.com` | admin | TechFlow Solutions Inc. | admin123 |
+| `admin@demo.com` | admin | TechFlow Solutions Inc. | admin123 |
 | `admin@techflow.com` | admin | TechFlow Solutions Inc. | password123_admin@techflow.com |
 | `purchasing@techflow.com` | purchaser | TechFlow Solutions Inc. | password123_purchasing@techflow.com |
 | `warehouse@techflow.com` | admin | TechFlow Solutions Inc. | password123_warehouse@techflow.com |
@@ -39,7 +39,7 @@ All user passwords are hashed using **bcrypt** (as required by the application's
 ```
 $2b$12$JrtOzQ6oLcvgzIxCFZm9TuXdP4DF6GRTE1d7mp2XocjsYypUtkuBO
 ```
-This is the bcrypt hash of "admin123" (used for admin@admin.com)
+This is the bcrypt hash of "admin123" (used for admin@demo.com)
 
 **Pattern 2: Email-based passwords**
 
@@ -116,7 +116,7 @@ For quick testing, you can use any of these login combinations:
 
 **Simple Admin (Easiest):**
 
-- Email: `admin@admin.com`
+- Email: `admin@demo.co`
 - Password: `admin123`
 
 **TechFlow Admin:**

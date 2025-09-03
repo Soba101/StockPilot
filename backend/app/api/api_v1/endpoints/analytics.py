@@ -153,7 +153,7 @@ def get_analytics(
             
     except Exception:
         # Fall back to original method if mart is not available
-        fulfilled_orders = [o for o in orders if o.status == 'fulfilled']
+        fulfilled_orders = [o for o in orders if o.status == 'completed']
         total_revenue = sum(float(order.total_amount or 0) for order in fulfilled_orders)
         total_orders = len(fulfilled_orders)
         avg_order_value = total_revenue / total_orders if total_orders > 0 else 0
@@ -161,7 +161,7 @@ def get_analytics(
         # Get order items for units calculation
         order_items = db.query(OrderItem).join(Order).filter(
             Order.org_id == org_id,
-            Order.status == 'fulfilled'
+            Order.status == 'completed'
         ).all()
         
         total_units = sum(item.quantity for item in order_items)
@@ -185,7 +185,7 @@ def get_analytics(
         Product.price
     ).select_from(Product).join(OrderItem, Product.id == OrderItem.product_id).join(Order, OrderItem.order_id == Order.id).filter(
         Order.org_id == org_id,
-        Order.status == 'fulfilled'
+        Order.status == 'completed'
     ).group_by(Product.id, Product.name, Product.sku, Product.cost, Product.price).order_by(
         desc('total_revenue')
     ).limit(5).all()
@@ -211,7 +211,7 @@ def get_analytics(
         func.sum(OrderItem.quantity * OrderItem.unit_price).label('revenue')
     ).select_from(Product).join(OrderItem, Product.id == OrderItem.product_id).join(Order, OrderItem.order_id == Order.id).filter(
         Order.org_id == org_id,
-        Order.status == 'fulfilled',
+        Order.status == 'completed',
         Product.category.isnot(None)
     ).group_by(Product.category).all()
     
@@ -239,7 +239,7 @@ def get_analytics(
         Order.channel
     ).select_from(Order).join(OrderItem, Order.id == OrderItem.order_id).join(Product, OrderItem.product_id == Product.id).filter(
         Order.org_id == org_id,
-        Order.status == 'fulfilled'
+        Order.status == 'completed'
     ).order_by(desc(Order.ordered_at)).limit(10).all()
     
     recent_sales = []
@@ -284,13 +284,13 @@ def get_analytics(
             
     except Exception:
         # Fall back to original method
-        fulfilled_orders = [o for o in orders if o.status == 'fulfilled']
-        if fulfilled_orders:
+        completed_orders = [o for o in orders if o.status == 'completed']
+        if completed_orders:
             # Group orders by date
             from collections import defaultdict
             daily_revenue = defaultdict(float)
             
-            for order in fulfilled_orders:
+            for order in completed_orders:
                 if order.ordered_at:
                     date_str = order.ordered_at.strftime('%m-%d')
                     daily_revenue[date_str] += float(order.total_amount or 0)
@@ -382,9 +382,54 @@ def get_sales_analytics(
     
     base_query += " ORDER BY sales_date DESC, gross_revenue DESC"
     
-    # Execute query
-    result = db.execute(text(base_query), params)
-    daily_sales_raw = result.fetchall()
+    # Execute query with fallback pattern
+    daily_sales_raw = []
+    try:
+        # Try mart query first
+        result = db.execute(text(base_query), params)
+        daily_sales_raw = result.fetchall()
+        if not daily_sales_raw:
+            raise Exception("No mart data available")
+    except Exception:
+        # Fallback to raw tables
+        db.rollback()
+        fallback_query = """
+            SELECT 
+                o.ordered_at::date as sales_date,
+                COALESCE(o.channel, 'Unknown') as channel,
+                COALESCE(l.name, 'Unknown') as location_name,
+                p.name as product_name,
+                p.sku,
+                COALESCE(p.category, 'Uncategorized') as category,
+                oi.quantity as units_sold,
+                (oi.unit_price * oi.quantity - oi.discount) as gross_revenue,
+                ((oi.unit_price - p.cost) * oi.quantity) as gross_margin,
+                CASE 
+                    WHEN oi.unit_price > 0 THEN ((oi.unit_price - p.cost) / oi.unit_price * 100)
+                    ELSE 0 
+                END as margin_percent,
+                1 as orders_count,
+                0 as units_7day_avg,
+                0 as units_30day_avg
+            FROM orders o
+            JOIN order_items oi ON o.id = oi.order_id
+            JOIN products p ON oi.product_id = p.id
+            LEFT JOIN locations l ON o.location_id = l.id
+            WHERE o.org_id = :org_id
+              AND o.ordered_at::date BETWEEN :start_date AND :end_date
+              AND o.status IN ('fulfilled', 'completed', 'shipped')
+        """
+        
+        # Add the same filters for fallback
+        if channel:
+            fallback_query += " AND COALESCE(o.channel, 'Unknown') = :channel"
+        if product_category:
+            fallback_query += " AND COALESCE(p.category, 'Uncategorized') = :product_category"
+            
+        fallback_query += " ORDER BY o.ordered_at DESC, gross_revenue DESC"
+        
+        result = db.execute(text(fallback_query), params)
+        daily_sales_raw = result.fetchall()
     
     # Convert to Pydantic models
     daily_sales = []
@@ -440,17 +485,50 @@ def get_sales_analytics(
         ORDER BY total_revenue DESC
     """
     
-    channel_result = db.execute(text(channel_query), params)
+    # Mart-first with safe fallback to raw tables
     channel_data = []
-    for row in channel_result.fetchall():
-        channel_data.append(ChannelPerformance(
-            channel=row.channel or 'Unknown',
-            total_revenue=float(row.total_revenue),
-            total_units=int(row.total_units),
-            orders_count=int(row.orders_count),
-            avg_order_value=float(row.total_revenue / row.orders_count) if row.orders_count > 0 else 0,
-            margin_percent=float(row.avg_margin_percent)
-        ))
+    try:
+        channel_result = db.execute(text(channel_query), params)
+        rows = channel_result.fetchall()
+        if not rows:
+            raise Exception("No mart data for channel performance")
+        for row in rows:
+            channel_data.append(ChannelPerformance(
+                channel=row.channel or 'Unknown',
+                total_revenue=float(row.total_revenue),
+                total_units=int(row.total_units),
+                orders_count=int(row.orders_count),
+                avg_order_value=float(row.total_revenue / row.orders_count) if row.orders_count > 0 else 0,
+                margin_percent=float(row.avg_margin_percent)
+            ))
+    except Exception:
+        db.rollback()
+        fallback_channel_query = """
+            SELECT 
+                COALESCE(o.channel, 'Unknown') as channel,
+                SUM(oi.unit_price * oi.quantity - oi.discount) as total_revenue,
+                SUM(oi.quantity) as total_units,
+                COUNT(DISTINCT o.id) as orders_count,
+                AVG(CASE WHEN oi.unit_price > 0 THEN ((oi.unit_price - p.cost) / oi.unit_price * 100) ELSE 0 END) as avg_margin_percent
+            FROM orders o
+            JOIN order_items oi ON o.id = oi.order_id
+            JOIN products p ON oi.product_id = p.id
+            WHERE o.org_id = :org_id
+              AND o.ordered_at::date BETWEEN :start_date AND :end_date
+              AND o.status IN ('fulfilled', 'completed', 'shipped')
+            GROUP BY COALESCE(o.channel, 'Unknown')
+            ORDER BY total_revenue DESC
+        """
+        rows = db.execute(text(fallback_channel_query), params).fetchall()
+        for row in rows:
+            channel_data.append(ChannelPerformance(
+                channel=row.channel or 'Unknown',
+                total_revenue=float(row.total_revenue or 0),
+                total_units=int(row.total_units or 0),
+                orders_count=int(row.orders_count or 0),
+                avg_order_value=float((row.total_revenue or 0) / row.orders_count) if row.orders_count else 0,
+                margin_percent=float(row.avg_margin_percent or 0)
+            ))
     
     # Top performing products
     top_products_query = """
@@ -470,18 +548,54 @@ def get_sales_analytics(
         LIMIT 10
     """
     
-    top_products_result = db.execute(text(top_products_query), params)
     top_performing_products = []
-    for row in top_products_result.fetchall():
-        top_performing_products.append({
-            "product_name": row.product_name,
-            "sku": row.sku,
-            "category": row.category or 'Uncategorized',
-            "total_revenue": float(row.total_revenue),
-            "total_units": int(row.total_units),
-            "avg_margin_percent": float(row.avg_margin_percent),
-            "avg_velocity": float(row.avg_velocity)
-        })
+    try:
+        top_products_result = db.execute(text(top_products_query), params)
+        rows = top_products_result.fetchall()
+        if not rows:
+            raise Exception("No mart data for top products")
+        for row in rows:
+            top_performing_products.append({
+                "product_name": row.product_name,
+                "sku": row.sku,
+                "category": row.category or 'Uncategorized',
+                "total_revenue": float(row.total_revenue),
+                "total_units": int(row.total_units),
+                "avg_margin_percent": float(row.avg_margin_percent),
+                "avg_velocity": float(row.avg_velocity)
+            })
+    except Exception:
+        db.rollback()
+        fallback_top_products_query = """
+            SELECT 
+                p.name as product_name,
+                p.sku,
+                COALESCE(p.category, 'Uncategorized') as category,
+                SUM(oi.unit_price * oi.quantity - oi.discount) as total_revenue,
+                SUM(oi.quantity) as total_units,
+                AVG(CASE WHEN oi.unit_price > 0 THEN ((oi.unit_price - p.cost) / oi.unit_price * 100) ELSE 0 END) as avg_margin_percent,
+                0 as avg_velocity
+            FROM orders o
+            JOIN order_items oi ON o.id = oi.order_id
+            JOIN products p ON oi.product_id = p.id
+            WHERE o.org_id = :org_id
+              AND o.ordered_at::date BETWEEN :start_date AND :end_date
+              AND o.status IN ('fulfilled', 'completed', 'shipped')
+            GROUP BY p.name, p.sku, COALESCE(p.category, 'Uncategorized')
+            ORDER BY total_revenue DESC
+            LIMIT 10
+        """
+        rows = db.execute(text(fallback_top_products_query), params).fetchall()
+        for row in rows:
+            top_performing_products.append({
+                "product_name": row.product_name,
+                "sku": row.sku,
+                "category": row.category or 'Uncategorized',
+                "total_revenue": float(row.total_revenue or 0),
+                "total_units": int(row.total_units or 0),
+                "avg_margin_percent": float(row.avg_margin_percent or 0),
+                "avg_velocity": 0.0
+            })
     
     # Trending analysis
     trending_analysis = {

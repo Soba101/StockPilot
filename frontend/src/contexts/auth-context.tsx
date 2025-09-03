@@ -32,6 +32,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Decode JWT to get user info (basic implementation)
       try {
         const payload = JSON.parse(atob(token.split('.')[1]));
+        
+        // Check if token is expired
+        const currentTime = Math.floor(Date.now() / 1000);
+        if (payload.exp && payload.exp < currentTime) {
+          console.log('Token expired, clearing storage');
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('refresh_token');
+          setIsLoading(false);
+          return;
+        }
+
         setUser({
           id: payload.sub,
           email: payload.email,
