@@ -28,3 +28,18 @@ async def test_bi_route_for_sales_query():
 async def test_bi_route_for_compare_years():
     d = await router.route("compare 2024 vs 2025 sales")
     assert d.route in ("BI","OPEN")
+
+@pytest.mark.asyncio
+async def test_bi_route_for_profit():
+    d = await router.route("what was our profit margin this month")
+    assert d.route in ("BI","OPEN")
+
+@pytest.mark.asyncio
+async def test_bi_route_for_category_breakdown():
+    d = await router.route("show sales by category last month")
+    assert d.route in ("BI","OPEN")
+
+@pytest.mark.asyncio
+async def test_bi_route_for_inventory_snapshot():
+    d = await router.route("inventory on hand for sku ABC-123")
+    assert d.route in ("BI","OPEN")

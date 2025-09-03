@@ -59,6 +59,15 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
             tables = ["analytics_marts.sales_daily"]
             # year detection like 2025
             import re
+            # Optional filters parsed from message
+            sku_filter: Optional[str] = None
+            category_filter: Optional[str] = None
+            msku = re.search(r"\bsku\s+([A-Za-z0-9._-]+)\b", msg)
+            if msku:
+                sku_filter = msku.group(1)
+            mcat = re.search(r"\b(?:in|by|for)\s+category\s+([A-Za-z0-9 &_/-]{2,})\b", msg)
+            if mcat:
+                category_filter = mcat.group(1).strip()
             m = re.search(r"\b(20\d{2})\b", msg)
             if m:
                 year = int(m.group(1))
@@ -126,6 +135,9 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
             q_matches = re.findall(r"\bq([1-4])\b", msg)
             wants_quarter = bool(q_matches)
             wants_vs = (" vs " in msg or "versus" in msg or "compare" in msg)
+            wants_profit = ("profit" in msg or "margin" in msg or "gross profit" in msg or "margin%" in msg or "gross margin" in msg)
+            wants_category_breakdown = ("by category" in msg or "category breakdown" in msg or "sales by category" in msg)
+            wants_inventory = (("on hand" in msg or "inventory" in msg or "stock on hand" in msg) and (sku_filter is not None))
 
             # Generic 2-period comparison parsing (years, months, weeks, specific dates, rolling windows)
             MONTHS = {
@@ -155,38 +167,40 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
 
             def summary_for_range(s: date, e: date):
                 nonlocal tables
-                q = text(
-                    """
-                    SELECT 
-                        COALESCE(sum(gross_revenue),0) as total_revenue,
-                        COALESCE(sum(orders_count),0) as total_orders,
-                        COALESCE(sum(units_sold),0) as total_units
-                    FROM analytics_marts.sales_daily
-                    WHERE org_id = :org_id
-                      AND sales_date BETWEEN :start_date AND :end_date
-                    """
+                base_sql = (
+                    "SELECT COALESCE(sum(gross_revenue),0) as total_revenue, "
+                    "COALESCE(sum(orders_count),0) as total_orders, COALESCE(sum(units_sold),0) as total_units "
+                    "FROM analytics_marts.sales_daily WHERE org_id = :org_id "
+                    "AND sales_date BETWEEN :start_date AND :end_date"
                 )
-                r = db.execute(q, {"org_id": org_id, "start_date": s, "end_date": e}).fetchone()
+                params = {"org_id": org_id, "start_date": s, "end_date": e}
+                if sku_filter:
+                    base_sql += " AND sku = :sku"
+                    params["sku"] = sku_filter
+                if category_filter:
+                    base_sql += " AND (LOWER(COALESCE(category,'uncategorized')) LIKE :cat_like)"
+                    params["cat_like"] = f"%{category_filter.lower()}%"
+                r = db.execute(text(base_sql), params).fetchone()
                 tr = float(r.total_revenue) if r and r.total_revenue is not None else 0.0
                 to = int(r.total_orders) if r and r.total_orders is not None else 0
                 tu = int(r.total_units) if r and r.total_units is not None else 0
                 if (not r) or (tr == 0 and to == 0 and tu == 0):
                     tables = ["orders", "order_items", "products"]
-                    fq = text(
-                        """
-                        SELECT 
-                            COALESCE(SUM(oi.quantity * oi.unit_price),0) as total_revenue,
-                            COUNT(DISTINCT o.id) as total_orders,
-                            COALESCE(SUM(oi.quantity),0) as total_units
-                        FROM orders o
-                        JOIN order_items oi ON oi.order_id = o.id
-                        JOIN products p ON p.id = oi.product_id
-                        WHERE o.org_id = :org_id
-                          AND o.status IN ('fulfilled','completed','shipped')
-                          AND o.ordered_at::date BETWEEN :start_date AND :end_date
-                        """
+                    fb_sql = (
+                        "SELECT COALESCE(SUM(oi.unit_price * oi.quantity - oi.discount),0) as total_revenue, "
+                        "COUNT(DISTINCT o.id) as total_orders, COALESCE(SUM(oi.quantity),0) as total_units "
+                        "FROM orders o JOIN order_items oi ON oi.order_id = o.id JOIN products p ON p.id = oi.product_id "
+                        "WHERE o.org_id = :org_id AND o.status IN ('fulfilled','completed','shipped') "
+                        "AND o.ordered_at::date BETWEEN :start_date AND :end_date"
                     )
-                    fr = db.execute(fq, {"org_id": org_id, "start_date": s, "end_date": e}).fetchone()
+                    fb_params = {"org_id": org_id, "start_date": s, "end_date": e}
+                    if sku_filter:
+                        fb_sql += " AND p.sku = :sku"
+                        fb_params["sku"] = sku_filter
+                    if category_filter:
+                        fb_sql += " AND (LOWER(COALESCE(p.category,'uncategorized')) LIKE :cat_like)"
+                        fb_params["cat_like"] = f"%{category_filter.lower()}%"
+                    fr = db.execute(text(fb_sql), fb_params).fetchone()
                     tr = float(fr.total_revenue) if fr and fr.total_revenue is not None else 0.0
                     to = int(fr.total_orders) if fr and fr.total_orders is not None else 0
                     tu = int(fr.total_units) if fr and fr.total_units is not None else 0
@@ -362,43 +376,99 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
             # Helper to compute headline metrics
             def compute_headline():
                 nonlocal tables
-                q = text(
-                    """
-                    SELECT 
-                        COALESCE(sum(gross_revenue),0) as total_revenue,
-                        COALESCE(sum(orders_count),0) as total_orders,
-                        COALESCE(sum(units_sold),0) as total_units
-                    FROM analytics_marts.sales_daily
-                    WHERE org_id = :org_id
-                      AND sales_date BETWEEN :start_date AND :end_date
-                    """
+                base_sql = (
+                    "SELECT COALESCE(sum(gross_revenue),0) as total_revenue, "
+                    "COALESCE(sum(orders_count),0) as total_orders, COALESCE(sum(units_sold),0) as total_units "
+                    "FROM analytics_marts.sales_daily "
+                    "WHERE org_id = :org_id AND sales_date BETWEEN :start_date AND :end_date"
                 )
-                res = db.execute(q, {"org_id": org_id, "start_date": start_date, "end_date": end_date}).fetchone()
+                params = {"org_id": org_id, "start_date": start_date, "end_date": end_date}
+                if sku_filter:
+                    base_sql += " AND sku = :sku"
+                    params["sku"] = sku_filter
+                if category_filter:
+                    base_sql += " AND (LOWER(COALESCE(category,'uncategorized')) LIKE :cat_like)"
+                    params["cat_like"] = f"%{category_filter.lower()}%"
+                q = text(base_sql)
+                res = db.execute(q, params).fetchone()
                 tr = float(res.total_revenue) if res and res.total_revenue is not None else 0.0
                 to = int(res.total_orders) if res and res.total_orders is not None else 0
                 tu = int(res.total_units) if res and res.total_units is not None else 0
                 if (not res) or (tr == 0 and to == 0 and tu == 0):
                     # Fallback: compute from raw tables
                     tables = ["orders", "order_items", "products"]
-                    fq = text(
-                        """
-                        SELECT 
-                            COALESCE(SUM(oi.quantity * oi.unit_price),0) as total_revenue,
-                            COUNT(DISTINCT o.id) as total_orders,
-                            COALESCE(SUM(oi.quantity),0) as total_units
-                        FROM orders o
-                        JOIN order_items oi ON oi.order_id = o.id
-                        JOIN products p ON p.id = oi.product_id
-                        WHERE o.org_id = :org_id
-                          AND o.status IN ('fulfilled','completed','shipped')
-                          AND o.ordered_at::date BETWEEN :start_date AND :end_date
-                        """
+                    fb_sql = (
+                        "SELECT COALESCE(SUM(oi.unit_price * oi.quantity - oi.discount),0) as total_revenue, "
+                        "COUNT(DISTINCT o.id) as total_orders, COALESCE(SUM(oi.quantity),0) as total_units "
+                        "FROM orders o JOIN order_items oi ON oi.order_id = o.id JOIN products p ON p.id = oi.product_id "
+                        "WHERE o.org_id = :org_id AND o.status IN ('fulfilled','completed','shipped') "
+                        "AND o.ordered_at::date BETWEEN :start_date AND :end_date"
                     )
-                    fres = db.execute(fq, {"org_id": org_id, "start_date": start_date, "end_date": end_date}).fetchone()
+                    fb_params = {"org_id": org_id, "start_date": start_date, "end_date": end_date}
+                    if sku_filter:
+                        fb_sql += " AND p.sku = :sku"
+                        fb_params["sku"] = sku_filter
+                    if category_filter:
+                        fb_sql += " AND (LOWER(COALESCE(p.category,'uncategorized')) LIKE :cat_like)"
+                        fb_params["cat_like"] = f"%{category_filter.lower()}%"
+                    fq = text(fb_sql)
+                    fres = db.execute(fq, fb_params).fetchone()
                     tr = float(fres.total_revenue) if fres and fres.total_revenue is not None else 0.0
                     to = int(fres.total_orders) if fres and fres.total_orders is not None else 0
                     tu = int(fres.total_units) if fres and fres.total_units is not None else 0
                 return tr, to, tu
+
+            # Profit headline computation (gross profit = revenue - cost)
+            def compute_profit_headline():
+                nonlocal tables
+                try:
+                    base_sql = (
+                        "SELECT COALESCE(sum(gross_revenue),0) as total_revenue, "
+                        "COALESCE(sum(orders_count),0) as total_orders, COALESCE(sum(units_sold),0) as total_units, "
+                        "COALESCE(sum(gross_profit),0) as total_profit "
+                        "FROM analytics_marts.sales_daily "
+                        "WHERE org_id = :org_id AND sales_date BETWEEN :start_date AND :end_date"
+                    )
+                    params = {"org_id": org_id, "start_date": start_date, "end_date": end_date}
+                    if sku_filter:
+                        base_sql += " AND sku = :sku"
+                        params["sku"] = sku_filter
+                    if category_filter:
+                        base_sql += " AND (LOWER(COALESCE(category,'uncategorized')) LIKE :cat_like)"
+                        params["cat_like"] = f"%{category_filter.lower()}%"
+                    r = db.execute(text(base_sql), params).fetchone()
+                    tr = float(getattr(r, 'total_revenue', 0) or 0)
+                    to = int(getattr(r, 'total_orders', 0) or 0)
+                    tu = int(getattr(r, 'total_units', 0) or 0)
+                    tp = float(getattr(r, 'total_profit', 0) or 0)
+                    if tr == 0 and to == 0 and tu == 0 and tp == 0:
+                        raise Exception("empty_mart")
+                except Exception:
+                    db.rollback()
+                    tables = ["orders", "order_items", "products"]
+                    fb_sql = (
+                        "SELECT COALESCE(SUM(oi.unit_price * oi.quantity - oi.discount),0) as total_revenue, "
+                        "COUNT(DISTINCT o.id) as total_orders, COALESCE(SUM(oi.quantity),0) as total_units, "
+                        "COALESCE(SUM((oi.unit_price * oi.quantity - oi.discount) - (COALESCE(p.cost,0) * oi.quantity)),0) as total_profit "
+                        "FROM orders o JOIN order_items oi ON oi.order_id = o.id JOIN products p ON p.id = oi.product_id "
+                        "WHERE o.org_id = :org_id AND o.status IN ('fulfilled','completed','shipped') "
+                        "AND o.ordered_at::date BETWEEN :start_date AND :end_date"
+                    )
+                    fb_params = {"org_id": org_id, "start_date": start_date, "end_date": end_date}
+                    if sku_filter:
+                        fb_sql += " AND p.sku = :sku"
+                        fb_params["sku"] = sku_filter
+                    if category_filter:
+                        fb_sql += " AND (LOWER(COALESCE(p.category,'uncategorized')) LIKE :cat_like)"
+                        fb_params["cat_like"] = f"%{category_filter.lower()}%"
+                    r = db.execute(text(fb_sql), fb_params).fetchone()
+                    tr = float(getattr(r, 'total_revenue', 0) or 0)
+                    to = int(getattr(r, 'total_orders', 0) or 0)
+                    tu = int(getattr(r, 'total_units', 0) or 0)
+                    tp = float(getattr(r, 'total_profit', 0) or 0)
+                margin_pct = (tp / tr * 100.0) if tr else 0.0
+                aov = (tr / to) if to > 0 else 0.0
+                return tr, to, tu, aov, tp, margin_pct
 
             # Top products intent
             if wants_top_products:
@@ -409,60 +479,69 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
                         limit = max(1, min(20, int(mlim.group(1))))
                     except Exception:
                         pass
-                # Mart-first: aggregate by product
+                # Mart-first: aggregate by product (allow profit ordering)
+                select_profit = ", SUM(gross_profit) as total_profit" if wants_profit else ""
+                order_metric = "total_profit" if wants_profit else "total_revenue"
+                where_extra = ""
+                params = {"org_id": org_id, "start_date": start_date, "end_date": end_date}
+                if sku_filter:
+                    where_extra += " AND sku = :sku"
+                    params["sku"] = sku_filter
+                if category_filter:
+                    where_extra += " AND (LOWER(COALESCE(category,'uncategorized')) LIKE :cat_like)"
+                    params["cat_like"] = f"%{category_filter.lower()}%"
                 qtp = text(
                     f"""
-                    SELECT 
-                        product_name,
-                        sku,
-                        COALESCE(category, 'Uncategorized') as category,
-                        SUM(gross_revenue) as total_revenue,
-                        SUM(units_sold) as total_units
+                    SELECT product_name, sku, COALESCE(category, 'Uncategorized') as category,
+                           SUM(gross_revenue) as total_revenue, SUM(units_sold) as total_units{select_profit}
                     FROM analytics_marts.sales_daily
-                    WHERE org_id = :org_id
-                      AND sales_date BETWEEN :start_date AND :end_date
+                    WHERE org_id = :org_id AND sales_date BETWEEN :start_date AND :end_date{where_extra}
                     GROUP BY product_name, sku, category
-                    ORDER BY total_revenue DESC
+                    ORDER BY {order_metric} DESC
                     LIMIT {limit}
                     """
                 )
                 rows = []
                 try:
-                    rows = db.execute(qtp, {"org_id": org_id, "start_date": start_date, "end_date": end_date}).fetchall()
+                    rows = db.execute(qtp, params).fetchall()
                     if not rows:
                         raise Exception("no_mart_rows")
                 except Exception:
                     db.rollback()
                     tables = ["orders", "order_items", "products"]
-                    qtp_fb = text(
-                        f"""
-                        SELECT 
-                            p.name as product_name,
-                            p.sku as sku,
-                            COALESCE(p.category, 'Uncategorized') as category,
-                            SUM(oi.unit_price * oi.quantity - oi.discount) as total_revenue,
-                            SUM(oi.quantity) as total_units
-                        FROM orders o
-                        JOIN order_items oi ON o.id = oi.order_id
-                        JOIN products p ON oi.product_id = p.id
-                        WHERE o.org_id = :org_id
-                          AND o.ordered_at::date BETWEEN :start_date AND :end_date
-                          AND o.status IN ('fulfilled','completed','shipped')
-                        GROUP BY p.name, p.sku, COALESCE(p.category, 'Uncategorized')
-                        ORDER BY total_revenue DESC
-                        LIMIT {limit}
-                        """
+                    fb_sql = (
+                        "SELECT p.name as product_name, p.sku as sku, COALESCE(p.category, 'Uncategorized') as category, "
+                        "SUM(oi.unit_price * oi.quantity - oi.discount) as total_revenue, SUM(oi.quantity) as total_units"
+                        + (", COALESCE(SUM((oi.unit_price * oi.quantity - oi.discount) - (COALESCE(p.cost,0) * oi.quantity)),0) as total_profit" if wants_profit else "") +
+                        " FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id "
+                        "WHERE o.org_id = :org_id AND o.ordered_at::date BETWEEN :start_date AND :end_date "
+                        "AND o.status IN ('fulfilled','completed','shipped')"
                     )
-                    rows = db.execute(qtp_fb, {"org_id": org_id, "start_date": start_date, "end_date": end_date}).fetchall()
+                    fb_params = {"org_id": org_id, "start_date": start_date, "end_date": end_date}
+                    if sku_filter:
+                        fb_sql += " AND p.sku = :sku"
+                        fb_params["sku"] = sku_filter
+                    if category_filter:
+                        fb_sql += " AND (LOWER(COALESCE(p.category,'uncategorized')) LIKE :cat_like)"
+                        fb_params["cat_like"] = f"%{category_filter.lower()}%"
+                    order_clause = " ORDER BY total_profit DESC" if wants_profit else " ORDER BY total_revenue DESC"
+                    fb_sql += " GROUP BY p.name, p.sku, COALESCE(p.category, 'Uncategorized')" + order_clause + f" LIMIT {limit}"
+                    rows = db.execute(text(fb_sql), fb_params).fetchall()
 
                 top_lines = []
                 rank = 1
                 for r in rows:
                     try:
-                        top_lines.append(f"{rank}. {r.sku} – {r.product_name} • ${float(r.total_revenue or 0):,.0f} revenue, {int(r.total_units or 0)} units")
+                        if wants_profit and hasattr(r, 'total_profit'):
+                            top_lines.append(f"{rank}. {r.sku} – {r.product_name} • ${float(r.total_revenue or 0):,.0f} rev, ${float(getattr(r,'total_profit',0) or 0):,.0f} profit, {int(r.total_units or 0)} units")
+                        else:
+                            top_lines.append(f"{rank}. {r.sku} – {r.product_name} • ${float(r.total_revenue or 0):,.0f} revenue, {int(r.total_units or 0)} units")
                     except Exception:
                         # SQLite Row access fallback by index
-                        top_lines.append(f"{rank}. {r[1]} – {r[0]} • ${float(r[3] or 0):,.0f} revenue, {int(r[4] or 0)} units")
+                        if wants_profit and len(r) >= 6:
+                            top_lines.append(f"{rank}. {r[1]} – {r[0]} • ${float(r[3] or 0):,.0f} rev, ${float(r[5] or 0):,.0f} profit, {int(r[4] or 0)} units")
+                        else:
+                            top_lines.append(f"{rank}. {r[1]} – {r[0]} • ${float(r[3] or 0):,.0f} revenue, {int(r[4] or 0)} units")
                     rank += 1
 
                 tr, to, tu = compute_headline()
@@ -479,46 +558,136 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
                 metrics = {"period": period_label, "total_revenue": tr, "total_orders": to, "total_units": tu, "aov": aov}
                 return composer.compose_bi(answer, decision.confidence, metrics=metrics, tables=tables)
 
-            # Daily time series intent
-            if wants_daily:
-                # Mart-first daily rollup
-                qd = text(
-                    """
-                    SELECT sales_date::date as d, 
-                           COALESCE(sum(gross_revenue),0) as revenue,
-                           COALESCE(sum(orders_count),0) as orders,
-                           COALESCE(sum(units_sold),0) as units
+            # Category breakdown intent (top 5 categories)
+            if wants_category_breakdown:
+                where_extra = ""
+                params = {"org_id": org_id, "start_date": start_date, "end_date": end_date}
+                if sku_filter:
+                    where_extra += " AND sku = :sku"
+                    params["sku"] = sku_filter
+                qcat = text(
+                    f"""
+                    SELECT COALESCE(category,'Uncategorized') as category, 
+                           SUM(gross_revenue) as revenue, SUM(units_sold) as units
                     FROM analytics_marts.sales_daily
-                    WHERE org_id = :org_id
-                      AND sales_date BETWEEN :start_date AND :end_date
-                    GROUP BY sales_date::date
-                    ORDER BY sales_date::date
+                    WHERE org_id = :org_id AND sales_date BETWEEN :start_date AND :end_date{where_extra}
+                    GROUP BY COALESCE(category,'Uncategorized')
+                    ORDER BY revenue DESC
+                    LIMIT 5
                     """
                 )
                 rows = []
                 try:
-                    rows = db.execute(qd, {"org_id": org_id, "start_date": start_date, "end_date": end_date}).fetchall()
+                    rows = db.execute(qcat, params).fetchall()
+                    if not rows:
+                        raise Exception("no_mart_rows")
+                except Exception:
+                    db.rollback()
+                    tables = ["orders", "order_items", "products"]
+                    fb_sql = (
+                        "SELECT COALESCE(p.category,'Uncategorized') as category, "
+                        "SUM(oi.unit_price * oi.quantity - oi.discount) as revenue, SUM(oi.quantity) as units "
+                        "FROM orders o JOIN order_items oi ON oi.order_id = o.id JOIN products p ON p.id = oi.product_id "
+                        "WHERE o.org_id = :org_id AND o.status IN ('fulfilled','completed','shipped') "
+                        "AND o.ordered_at::date BETWEEN :start_date AND :end_date"
+                    )
+                    fb_params = {"org_id": org_id, "start_date": start_date, "end_date": end_date}
+                    if sku_filter:
+                        fb_sql += " AND p.sku = :sku"
+                        fb_params["sku"] = sku_filter
+                    fb_sql += " GROUP BY COALESCE(p.category,'Uncategorized') ORDER BY revenue DESC LIMIT 5"
+                    rows = db.execute(text(fb_sql), fb_params).fetchall()
+
+                lines = []
+                for r in rows:
+                    try:
+                        lines.append(f"- {r.category}: ${float(r.revenue or 0):,.0f} • {int(r.units or 0)} units")
+                    except Exception:
+                        lines.append(f"- {r[0]}: ${float(r[1] or 0):,.0f} • {int(r[2] or 0)} units")
+
+                tr, to, tu = compute_headline()
+                aov = (tr / to) if to > 0 else 0.0
+                period_label = f"{start_date.isoformat()} to {end_date.isoformat()}"
+                answer = (
+                    f"Top categories for {period_label} (max 5):\n" + ("\n".join(lines) if lines else "No sales recorded.") +
+                    f"\n\nHeadline metrics for {period_label}:\n- Total revenue: ${tr:,.2f}\n- Total orders: {to}\n- Total units: {tu}\n- AOV: ${aov:,.2f}"
+                )
+                metrics = {"period": period_label, "total_revenue": tr, "total_orders": to, "total_units": tu, "aov": aov}
+                return composer.compose_bi(answer, decision.confidence, metrics=metrics, tables=tables)
+
+            # Inventory snapshot by SKU (sum movements per location)
+            if wants_inventory and sku_filter:
+                try:
+                    inv_sql = text(
+                        """
+                        SELECT l.name as location_name, COALESCE(SUM(m.quantity),0) as on_hand
+                        FROM inventory_movements m
+                        JOIN products p ON p.id = m.product_id
+                        JOIN locations l ON l.id = m.location_id
+                        WHERE p.org_id = :org_id AND p.sku = :sku
+                        GROUP BY l.name
+                        ORDER BY l.name
+                        """
+                    )
+                    rows = db.execute(inv_sql, {"org_id": org_id, "sku": sku_filter}).fetchall()
+                    per_loc = []
+                    total = 0
+                    for r in rows:
+                        try:
+                            per_loc.append(f"- {r.location_name}: {int(r.on_hand or 0)} units")
+                            total += int(r.on_hand or 0)
+                        except Exception:
+                            per_loc.append(f"- {r[0]}: {int(r[1] or 0)} units")
+                            total += int(r[1] or 0)
+                    answer = f"On-hand inventory for SKU {sku_filter}: {total} units\n" + ("\n".join(per_loc) if per_loc else "No inventory movements found.")
+                    metrics = {"sku": sku_filter, "on_hand_total": total}
+                    return composer.compose_bi(answer, decision.confidence, metrics=metrics, tables=["inventory_movements"])
+                except Exception as e:
+                    logging.warning(f"Inventory snapshot error: {e}")
+                    # fall through to default BI summary
+
+            # Daily time series intent
+            if wants_daily:
+                # Mart-first daily rollup
+                base_sql = (
+                    "SELECT sales_date::date as d, COALESCE(sum(gross_revenue),0) as revenue, "
+                    "COALESCE(sum(orders_count),0) as orders, COALESCE(sum(units_sold),0) as units "
+                    "FROM analytics_marts.sales_daily WHERE org_id = :org_id "
+                    "AND sales_date BETWEEN :start_date AND :end_date"
+                )
+                params = {"org_id": org_id, "start_date": start_date, "end_date": end_date}
+                if sku_filter:
+                    base_sql += " AND sku = :sku"
+                    params["sku"] = sku_filter
+                if category_filter:
+                    base_sql += " AND (LOWER(COALESCE(category,'uncategorized')) LIKE :cat_like)"
+                    params["cat_like"] = f"%{category_filter.lower()}%"
+                base_sql += " GROUP BY sales_date::date ORDER BY sales_date::date"
+                qd = text(base_sql)
+                rows = []
+                try:
+                    rows = db.execute(qd, params).fetchall()
                     if not rows:
                         raise Exception("no_mart_rows")
                 except Exception:
                     db.rollback()
                     tables = ["orders", "order_items"]
-                    qd_fb = text(
-                        """
-                        SELECT o.ordered_at::date as d,
-                               COALESCE(SUM(oi.unit_price * oi.quantity - oi.discount),0) as revenue,
-                               COUNT(DISTINCT o.id) as orders,
-                               COALESCE(SUM(oi.quantity),0) as units
-                        FROM orders o
-                        JOIN order_items oi ON oi.order_id = o.id
-                        WHERE o.org_id = :org_id
-                          AND o.status IN ('fulfilled','completed','shipped')
-                          AND o.ordered_at::date BETWEEN :start_date AND :end_date
-                        GROUP BY o.ordered_at::date
-                        ORDER BY o.ordered_at::date
-                        """
+                    fb_sql = (
+                        "SELECT o.ordered_at::date as d, COALESCE(SUM(oi.unit_price * oi.quantity - oi.discount),0) as revenue, "
+                        "COUNT(DISTINCT o.id) as orders, COALESCE(SUM(oi.quantity),0) as units "
+                        "FROM orders o JOIN order_items oi ON oi.order_id = o.id "
+                        "WHERE o.org_id = :org_id AND o.status IN ('fulfilled','completed','shipped') "
+                        "AND o.ordered_at::date BETWEEN :start_date AND :end_date"
                     )
-                    rows = db.execute(qd_fb, {"org_id": org_id, "start_date": start_date, "end_date": end_date}).fetchall()
+                    fb_params = {"org_id": org_id, "start_date": start_date, "end_date": end_date}
+                    if sku_filter:
+                        fb_sql += " AND oi.product_id IN (SELECT id FROM products WHERE sku = :sku)"
+                        fb_params["sku"] = sku_filter
+                    if category_filter:
+                        fb_sql += " AND oi.product_id IN (SELECT id FROM products WHERE LOWER(COALESCE(category,'uncategorized')) LIKE :cat_like)"
+                        fb_params["cat_like"] = f"%{category_filter.lower()}%"
+                    fb_sql += " GROUP BY o.ordered_at::date ORDER BY o.ordered_at::date"
+                    rows = db.execute(text(fb_sql), fb_params).fetchall()
 
                 # Build concise answer: show up to last 10 rows
                 series_lines = []
@@ -558,38 +727,40 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
 
                 def summary_for_range(s: date, e: date):
                     nonlocal tables
-                    q = text(
-                        """
-                        SELECT 
-                            COALESCE(sum(gross_revenue),0) as total_revenue,
-                            COALESCE(sum(orders_count),0) as total_orders,
-                            COALESCE(sum(units_sold),0) as total_units
-                        FROM analytics_marts.sales_daily
-                        WHERE org_id = :org_id
-                          AND sales_date BETWEEN :start_date AND :end_date
-                        """
+                    base_sql = (
+                        "SELECT COALESCE(sum(gross_revenue),0) as total_revenue, "
+                        "COALESCE(sum(orders_count),0) as total_orders, COALESCE(sum(units_sold),0) as total_units "
+                        "FROM analytics_marts.sales_daily WHERE org_id = :org_id "
+                        "AND sales_date BETWEEN :start_date AND :end_date"
                     )
-                    r = db.execute(q, {"org_id": org_id, "start_date": s, "end_date": e}).fetchone()
+                    params = {"org_id": org_id, "start_date": s, "end_date": e}
+                    if sku_filter:
+                        base_sql += " AND sku = :sku"
+                        params["sku"] = sku_filter
+                    if category_filter:
+                        base_sql += " AND (LOWER(COALESCE(category,'uncategorized')) LIKE :cat_like)"
+                        params["cat_like"] = f"%{category_filter.lower()}%"
+                    r = db.execute(text(base_sql), params).fetchone()
                     tr = float(r.total_revenue) if r and r.total_revenue is not None else 0.0
                     to = int(r.total_orders) if r and r.total_orders is not None else 0
                     tu = int(r.total_units) if r and r.total_units is not None else 0
                     if (not r) or (tr == 0 and to == 0 and tu == 0):
                         tables = ["orders", "order_items", "products"]
-                        fq = text(
-                            """
-                            SELECT 
-                                COALESCE(SUM(oi.quantity * oi.unit_price),0) as total_revenue,
-                                COUNT(DISTINCT o.id) as total_orders,
-                                COALESCE(SUM(oi.quantity),0) as total_units
-                            FROM orders o
-                            JOIN order_items oi ON oi.order_id = o.id
-                            JOIN products p ON p.id = oi.product_id
-                            WHERE o.org_id = :org_id
-                              AND o.status IN ('fulfilled','completed','shipped')
-                              AND o.ordered_at::date BETWEEN :start_date AND :end_date
-                            """
+                        fb_sql = (
+                            "SELECT COALESCE(SUM(oi.unit_price * oi.quantity - oi.discount),0) as total_revenue, "
+                            "COUNT(DISTINCT o.id) as total_orders, COALESCE(SUM(oi.quantity),0) as total_units "
+                            "FROM orders o JOIN order_items oi ON oi.order_id = o.id JOIN products p ON p.id = oi.product_id "
+                            "WHERE o.org_id = :org_id AND o.status IN ('fulfilled','completed','shipped') "
+                            "AND o.ordered_at::date BETWEEN :start_date AND :end_date"
                         )
-                        fr = db.execute(fq, {"org_id": org_id, "start_date": s, "end_date": e}).fetchone()
+                        fb_params = {"org_id": org_id, "start_date": s, "end_date": e}
+                        if sku_filter:
+                            fb_sql += " AND p.sku = :sku"
+                            fb_params["sku"] = sku_filter
+                        if category_filter:
+                            fb_sql += " AND (LOWER(COALESCE(p.category,'uncategorized')) LIKE :cat_like)"
+                            fb_params["cat_like"] = f"%{category_filter.lower()}%"
+                        fr = db.execute(text(fb_sql), fb_params).fetchone()
                         tr = float(fr.total_revenue) if fr and fr.total_revenue is not None else 0.0
                         to = int(fr.total_orders) if fr and fr.total_orders is not None else 0
                         tu = int(fr.total_units) if fr and fr.total_units is not None else 0
@@ -670,6 +841,22 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
                     )
                     metrics = {"period": period_label, "total_revenue": trQ, "total_orders": toQ, "total_units": tuQ, "aov": aovQ}
                     return composer.compose_bi(answer, decision.confidence, metrics=metrics, tables=tables)
+
+            # Profit headline (when asked directly and not other specific intents)
+            if wants_profit and not wants_top_products and not wants_daily and not wants_vs and not wants_category_breakdown and not wants_quarter:
+                tr2 = to2 = tu2 = aov2 = tp = margin_pct = 0.0
+                try:
+                    rtr, rto, rtu, raov, rtp, rmp = compute_profit_headline()
+                    tr2, to2, tu2, aov2, tp, margin_pct = rtr, rto, rtu, raov, rtp, rmp
+                except Exception as e:
+                    logging.warning(f"Profit headline error: {e}")
+                period_label = f"{start_date.isoformat()} to {end_date.isoformat()}"
+                answer = (
+                    f"Profit summary for {period_label}:\n"
+                    f"- Revenue: ${tr2:,.2f}\n- Orders: {int(to2)}\n- Units: {int(tu2)}\n- AOV: ${aov2:,.2f}\n- Gross profit: ${tp:,.2f}\n- Margin: {margin_pct:.1f}%"
+                )
+                metrics = {"period": period_label, "revenue": tr2, "orders": int(to2), "units": int(tu2), "aov": aov2, "gross_profit": tp, "margin_pct": margin_pct}
+                return composer.compose_bi(answer, decision.confidence, metrics=metrics, tables=tables)
 
             # Default: headline summary
             # Mart-first query for headline metrics

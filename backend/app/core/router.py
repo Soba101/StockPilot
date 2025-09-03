@@ -31,9 +31,9 @@ BI_KEYWORDS = [
     "yoy", "year over year", "mom", "month over month", "qoq", "quarter over quarter",
     # Groupings / dimensions
     "channel", "sales channel", "marketplace", "shopify", "amazon", "shopee", "lazada", "tiktok",
-    "category", "brand", "sku", "product", "top products", "best sellers", "top sellers", "winners",
+    "category", "brand", "sku", "product", "top products", "best sellers", "top sellers", "winners", "by category", "category breakdown",
     # Operational metrics
-    "conversion", "refunds", "returns", "discount", "markdown", "promotion",
+    "conversion", "refunds", "returns", "discount", "markdown", "promotion", "inventory", "on hand", "stock on hand",
 ]
 BI_STRONG_TRIGGERS = [
     "sales", "revenue", "orders", "units", "aov", "gross margin", "gmv", "profit"
