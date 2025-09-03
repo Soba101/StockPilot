@@ -34,6 +34,8 @@ BI_KEYWORDS = [
     "category", "brand", "sku", "product", "top products", "best sellers", "top sellers", "winners", "by category", "category breakdown",
     # Operational metrics
     "conversion", "refunds", "returns", "discount", "markdown", "promotion", "inventory", "on hand", "stock on hand",
+    # Data coverage / range queries
+    "how many years", "years of data", "data coverage", "coverage", "earliest", "latest", "start date", "end date", "date range",
 ]
 BI_STRONG_TRIGGERS = [
     "sales", "revenue", "orders", "units", "aov", "gross margin", "gmv", "profit"

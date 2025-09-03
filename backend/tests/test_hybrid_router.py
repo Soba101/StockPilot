@@ -43,3 +43,8 @@ async def test_bi_route_for_category_breakdown():
 async def test_bi_route_for_inventory_snapshot():
     d = await router.route("inventory on hand for sku ABC-123")
     assert d.route in ("BI","OPEN")
+
+@pytest.mark.asyncio
+async def test_bi_route_for_data_coverage():
+    d = await router.route("how many years of data do you have?")
+    assert d.route in ("BI","OPEN")

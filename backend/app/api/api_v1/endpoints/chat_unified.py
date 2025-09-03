@@ -138,6 +138,7 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
             wants_profit = ("profit" in msg or "margin" in msg or "gross profit" in msg or "margin%" in msg or "gross margin" in msg)
             wants_category_breakdown = ("by category" in msg or "category breakdown" in msg or "sales by category" in msg)
             wants_inventory = (("on hand" in msg or "inventory" in msg or "stock on hand" in msg) and (sku_filter is not None))
+            wants_coverage = ("how many years" in msg or "years of data" in msg or "data coverage" in msg or "date range" in msg or ("earliest" in msg and "latest" in msg))
 
             # Generic 2-period comparison parsing (years, months, weeks, specific dates, rolling windows)
             MONTHS = {
@@ -556,6 +557,50 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
                     f"- Total revenue: ${tr:,.2f}\n- Total orders: {to}\n- Total units: {tu}\n- Average order value: ${aov:,.2f}"
                 )
                 metrics = {"period": period_label, "total_revenue": tr, "total_orders": to, "total_units": tu, "aov": aov}
+                return composer.compose_bi(answer, decision.confidence, metrics=metrics, tables=tables)
+
+            # Data coverage intent (earliest/latest + coverage years)
+            if wants_coverage:
+                try:
+                    # Try analytics mart for min/max
+                    qcov = text(
+                        """
+                        SELECT MIN(sales_date)::date as first_date, MAX(sales_date)::date as last_date
+                        FROM analytics_marts.sales_daily
+                        WHERE org_id = :org_id
+                        """
+                    )
+                    row = db.execute(qcov, {"org_id": org_id}).fetchone()
+                    if not row or (not getattr(row, 'first_date', None)) or (not getattr(row, 'last_date', None)):
+                        raise Exception("empty_mart")
+                    first_date = getattr(row, 'first_date')
+                    last_date = getattr(row, 'last_date')
+                    tables = ["analytics_marts.sales_daily"]
+                except Exception:
+                    db.rollback()
+                    # Fallback to raw orders
+                    qcov2 = text(
+                        """
+                        SELECT MIN(o.ordered_at)::date as first_date, MAX(o.ordered_at)::date as last_date
+                        FROM orders o
+                        WHERE o.org_id = :org_id AND o.status IN ('fulfilled','completed','shipped')
+                        """
+                    )
+                    row = db.execute(qcov2, {"org_id": org_id}).fetchone()
+                    first_date = getattr(row, 'first_date', None)
+                    last_date = getattr(row, 'last_date', None)
+                    tables = ["orders"]
+
+                if first_date and last_date:
+                    days = (last_date - first_date).days + 1
+                    years = days / 365.0
+                    answer = (
+                        f"Data coverage: {first_date} to {last_date} (≈{years:.1f} years)."
+                    )
+                    metrics = {"first_date": str(first_date), "last_date": str(last_date), "years": years}
+                else:
+                    answer = "No sales data found yet."
+                    metrics = {}
                 return composer.compose_bi(answer, decision.confidence, metrics=metrics, tables=tables)
 
             # Category breakdown intent (top 5 categories)
