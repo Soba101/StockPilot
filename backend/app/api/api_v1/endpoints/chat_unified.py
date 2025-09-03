@@ -125,7 +125,181 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
             # Quarter detection and comparison intent
             q_matches = re.findall(r"\bq([1-4])\b", msg)
             wants_quarter = bool(q_matches)
-            wants_vs = (" vs " in msg or "versus" in msg)
+            wants_vs = (" vs " in msg or "versus" in msg or "compare" in msg)
+
+            # Generic 2-period comparison parsing (years, months, weeks, specific dates, rolling windows)
+            MONTHS = {
+                "jan": 1, "january": 1,
+                "feb": 2, "february": 2,
+                "mar": 3, "march": 3,
+                "apr": 4, "april": 4,
+                "may": 5,
+                "jun": 6, "june": 6,
+                "jul": 7, "july": 7,
+                "aug": 8, "august": 8,
+                "sep": 9, "sept": 9, "september": 9,
+                "oct": 10, "october": 10,
+                "nov": 11, "november": 11,
+                "dec": 12, "december": 12,
+            }
+
+            def month_range(y: int, m: int) -> tuple[date, date]:
+                from calendar import monthrange
+                last_day = monthrange(y, m)[1]
+                return datetime(y, m, 1).date(), datetime(y, m, last_day).date()
+
+            def week_range_for(d: date) -> tuple[date, date]:
+                # ISO week Monday..Sunday
+                start = d - timedelta(days=d.weekday())
+                return start, start + timedelta(days=6)
+
+            def summary_for_range(s: date, e: date):
+                nonlocal tables
+                q = text(
+                    """
+                    SELECT 
+                        COALESCE(sum(gross_revenue),0) as total_revenue,
+                        COALESCE(sum(orders_count),0) as total_orders,
+                        COALESCE(sum(units_sold),0) as total_units
+                    FROM analytics_marts.sales_daily
+                    WHERE org_id = :org_id
+                      AND sales_date BETWEEN :start_date AND :end_date
+                    """
+                )
+                r = db.execute(q, {"org_id": org_id, "start_date": s, "end_date": e}).fetchone()
+                tr = float(r.total_revenue) if r and r.total_revenue is not None else 0.0
+                to = int(r.total_orders) if r and r.total_orders is not None else 0
+                tu = int(r.total_units) if r and r.total_units is not None else 0
+                if (not r) or (tr == 0 and to == 0 and tu == 0):
+                    tables = ["orders", "order_items", "products"]
+                    fq = text(
+                        """
+                        SELECT 
+                            COALESCE(SUM(oi.quantity * oi.unit_price),0) as total_revenue,
+                            COUNT(DISTINCT o.id) as total_orders,
+                            COALESCE(SUM(oi.quantity),0) as total_units
+                        FROM orders o
+                        JOIN order_items oi ON oi.order_id = o.id
+                        JOIN products p ON p.id = oi.product_id
+                        WHERE o.org_id = :org_id
+                          AND o.status IN ('fulfilled','completed','shipped')
+                          AND o.ordered_at::date BETWEEN :start_date AND :end_date
+                        """
+                    )
+                    fr = db.execute(fq, {"org_id": org_id, "start_date": s, "end_date": e}).fetchone()
+                    tr = float(fr.total_revenue) if fr and fr.total_revenue is not None else 0.0
+                    to = int(fr.total_orders) if fr and fr.total_orders is not None else 0
+                    tu = int(fr.total_units) if fr and fr.total_units is not None else 0
+                aov = (tr / to) if to > 0 else 0.0
+                return tr, to, tu, aov
+
+            def try_parse_two_periods() -> Optional[tuple[str, date, date, str, date, date]]:
+                # 1) two explicit years
+                years = re.findall(r"\b(20\d{2})\b", msg)
+                if len(years) >= 2:
+                    y1, y2 = int(years[0]), int(years[1])
+                    s1, e1 = datetime(y1, 1, 1).date(), datetime(y1, 12, 31).date()
+                    s2, e2 = datetime(y2, 1, 1).date(), datetime(y2, 12, 31).date()
+                    return (str(y1), s1, e1, str(y2), s2, e2)
+
+                # 2) this year vs last year
+                if ("this year" in msg or "ytd" in msg or "year to date" in msg) and ("last year" in msg or "prior year" in msg or "previous year" in msg):
+                    y = end_date.year
+                    s1, e1 = end_date.replace(month=1, day=1), end_date
+                    s2, e2 = datetime(y-1, 1, 1).date(), datetime(y-1, 12, 31).date()
+                    return (f"YTD {y}", s1, e1, f"Year {y-1}", s2, e2)
+
+                # 3) two explicit dates (YYYY-MM-DD)
+                d_matches = re.findall(r"\b(20\d{2})-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])\b", msg)
+                if len(d_matches) >= 2:
+                    y1, m1, d1 = map(int, d_matches[0])
+                    y2, m2, d2 = map(int, d_matches[1])
+                    s1 = e1 = datetime(y1, m1, d1).date()
+                    s2 = e2 = datetime(y2, m2, d2).date()
+                    return (f"{s1}", s1, e1, f"{s2}", s2, e2)
+
+                # 4) this month vs last month
+                if ("this month" in msg or "mtd" in msg) and ("last month" in msg or "previous month" in msg or "prior month" in msg):
+                    first_of_this = end_date.replace(day=1)
+                    last_month_end = first_of_this - timedelta(days=1)
+                    s1, e1 = first_of_this, end_date  # MTD
+                    s2, e2 = last_month_end.replace(day=1), last_month_end
+                    return (f"MTD {end_date.strftime('%b %Y')}", s1, e1, f"{last_month_end.strftime('%b %Y')}", s2, e2)
+
+                # 5) two months (optionally with years)
+                # capture month tokens possibly followed by a year
+                m_tokens = list(re.finditer(r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b(?:\s+(20\d{2}))?", msg))
+                if len(m_tokens) >= 2:
+                    m1 = m_tokens[0].group(1); y1 = int(m_tokens[0].group(2)) if m_tokens[0].group(2) else end_date.year
+                    m2 = m_tokens[1].group(1); y2 = int(m_tokens[1].group(2)) if m_tokens[1].group(2) else end_date.year
+                    s1, e1 = month_range(y1, MONTHS[m1])
+                    s2, e2 = month_range(y2, MONTHS[m2])
+                    return (f"{m1.title()} {y1}", s1, e1, f"{m2.title()} {y2}", s2, e2)
+
+                # 6) this week vs last week
+                if ("this week" in msg) and ("last week" in msg or "previous week" in msg or "prior week" in msg):
+                    s1, e1 = week_range_for(end_date)
+                    this_mon = s1
+                    s2, e2 = this_mon - timedelta(days=7), this_mon - timedelta(days=1)
+                    return ("This week", s1, e1, "Last week", s2, e2)
+
+                # 7) last N days vs previous/prior N days
+                mwin = re.search(r"last\s+(\d{1,3})\s+days\s+(?:vs|versus|compared\s+to)\s+(?:previous|prior)\s+\1\s+days", msg)
+                if mwin:
+                    n = int(mwin.group(1))
+                    s1, e1 = end_date - timedelta(days=n-1), end_date
+                    s2, e2 = s1 - timedelta(days=n), s1 - timedelta(days=1)
+                    return (f"Last {n} days", s1, e1, f"Prior {n} days", s2, e2)
+
+                return None
+
+            # General compare handler (non-quarter, non-top-products, non-daily)
+            if wants_vs and not wants_quarter and not wants_top_products and not wants_daily:
+                parsed = try_parse_two_periods()
+                if parsed:
+                    lblA, sA, eA, lblB, sB, eB = parsed
+                    trA, toA, tuA, aovA = summary_for_range(sA, eA)
+                    trB, toB, tuB, aovB = summary_for_range(sB, eB)
+
+                    def pct(chg_num, base):
+                        return ((chg_num - base) / base * 100.0) if base else 0.0
+
+                    dr = pct(trB, trA)
+                    do = pct(toB, toA)
+                    du = pct(tuB, tuA)
+                    da = pct(aovB, aovA)
+                    header = f"{lblA} vs {lblB}"
+                    lines = [
+                        f"- {lblA}: revenue ${trA:,.2f}, orders {toA}, units {tuA}, AOV ${aovA:,.2f}",
+                        f"- {lblB}: revenue ${trB:,.2f}, orders {toB}, units {tuB}, AOV ${aovB:,.2f}",
+                        f"- Change ({lblB} vs {lblA}): revenue {dr:+.1f}%, orders {do:+.1f}%, units {du:+.1f}%, AOV {da:+.1f}%",
+                    ]
+                    try:
+                        sys = (
+                            "You are StockPilot. Using ONLY these metrics, write a 1-2 sentence neutral comparison."
+                            " Do not invent numbers."
+                        )
+                        content = (
+                            f"User question: {req.message}\n"
+                            f"Metrics JSON: {{'{lblA}': {{'revenue': {trA}, 'orders': {toA}, 'units': {tuA}, 'aov': {aovA}}},"
+                            f" '{lblB}': {{'revenue': {trB}, 'orders': {toB}, 'units': {tuB}, 'aov': {aovB}}},"
+                            f" 'delta_pct': {{'revenue': {dr}, 'orders': {do}, 'units': {du}, 'aov': {da}}}}}"
+                        )
+                        narrative = await lmstudio_client.get_chat_response([
+                            {"role": "system", "content": sys},
+                            {"role": "user", "content": content}
+                        ], temperature=0.2, max_tokens=120)
+                    except Exception:
+                        narrative = ""
+                    answer = header + ("\n\n" + narrative.strip() if narrative else "") + "\n\n" + "\n".join(lines)
+                    metrics = {
+                        "comparison": {
+                            "lhs": {"label": lblA, "revenue": trA, "orders": toA, "units": tuA, "aov": aovA},
+                            "rhs": {"label": lblB, "revenue": trB, "orders": toB, "units": tuB, "aov": aovB},
+                            "delta_pct": {"revenue": dr, "orders": do, "units": du, "aov": da}
+                        }
+                    }
+                    return composer.compose_bi(answer, decision.confidence, metrics=metrics, tables=tables)
 
             # Helper to compute headline metrics
             def compute_headline():

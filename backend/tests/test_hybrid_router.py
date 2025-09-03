@@ -23,3 +23,8 @@ async def test_open_fallback():
 async def test_bi_route_for_sales_query():
     d = await router.route("how are my sales doing this year")
     assert d.route in ("BI","OPEN")
+
+@pytest.mark.asyncio
+async def test_bi_route_for_compare_years():
+    d = await router.route("compare 2024 vs 2025 sales")
+    assert d.route in ("BI","OPEN")
