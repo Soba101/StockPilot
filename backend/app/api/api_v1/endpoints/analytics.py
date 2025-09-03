@@ -485,17 +485,50 @@ def get_sales_analytics(
         ORDER BY total_revenue DESC
     """
     
-    channel_result = db.execute(text(channel_query), params)
+    # Mart-first with safe fallback to raw tables
     channel_data = []
-    for row in channel_result.fetchall():
-        channel_data.append(ChannelPerformance(
-            channel=row.channel or 'Unknown',
-            total_revenue=float(row.total_revenue),
-            total_units=int(row.total_units),
-            orders_count=int(row.orders_count),
-            avg_order_value=float(row.total_revenue / row.orders_count) if row.orders_count > 0 else 0,
-            margin_percent=float(row.avg_margin_percent)
-        ))
+    try:
+        channel_result = db.execute(text(channel_query), params)
+        rows = channel_result.fetchall()
+        if not rows:
+            raise Exception("No mart data for channel performance")
+        for row in rows:
+            channel_data.append(ChannelPerformance(
+                channel=row.channel or 'Unknown',
+                total_revenue=float(row.total_revenue),
+                total_units=int(row.total_units),
+                orders_count=int(row.orders_count),
+                avg_order_value=float(row.total_revenue / row.orders_count) if row.orders_count > 0 else 0,
+                margin_percent=float(row.avg_margin_percent)
+            ))
+    except Exception:
+        db.rollback()
+        fallback_channel_query = """
+            SELECT 
+                COALESCE(o.channel, 'Unknown') as channel,
+                SUM(oi.unit_price * oi.quantity - oi.discount) as total_revenue,
+                SUM(oi.quantity) as total_units,
+                COUNT(DISTINCT o.id) as orders_count,
+                AVG(CASE WHEN oi.unit_price > 0 THEN ((oi.unit_price - p.cost) / oi.unit_price * 100) ELSE 0 END) as avg_margin_percent
+            FROM orders o
+            JOIN order_items oi ON o.id = oi.order_id
+            JOIN products p ON oi.product_id = p.id
+            WHERE o.org_id = :org_id
+              AND o.ordered_at::date BETWEEN :start_date AND :end_date
+              AND o.status IN ('fulfilled', 'completed', 'shipped')
+            GROUP BY COALESCE(o.channel, 'Unknown')
+            ORDER BY total_revenue DESC
+        """
+        rows = db.execute(text(fallback_channel_query), params).fetchall()
+        for row in rows:
+            channel_data.append(ChannelPerformance(
+                channel=row.channel or 'Unknown',
+                total_revenue=float(row.total_revenue or 0),
+                total_units=int(row.total_units or 0),
+                orders_count=int(row.orders_count or 0),
+                avg_order_value=float((row.total_revenue or 0) / row.orders_count) if row.orders_count else 0,
+                margin_percent=float(row.avg_margin_percent or 0)
+            ))
     
     # Top performing products
     top_products_query = """
@@ -515,18 +548,54 @@ def get_sales_analytics(
         LIMIT 10
     """
     
-    top_products_result = db.execute(text(top_products_query), params)
     top_performing_products = []
-    for row in top_products_result.fetchall():
-        top_performing_products.append({
-            "product_name": row.product_name,
-            "sku": row.sku,
-            "category": row.category or 'Uncategorized',
-            "total_revenue": float(row.total_revenue),
-            "total_units": int(row.total_units),
-            "avg_margin_percent": float(row.avg_margin_percent),
-            "avg_velocity": float(row.avg_velocity)
-        })
+    try:
+        top_products_result = db.execute(text(top_products_query), params)
+        rows = top_products_result.fetchall()
+        if not rows:
+            raise Exception("No mart data for top products")
+        for row in rows:
+            top_performing_products.append({
+                "product_name": row.product_name,
+                "sku": row.sku,
+                "category": row.category or 'Uncategorized',
+                "total_revenue": float(row.total_revenue),
+                "total_units": int(row.total_units),
+                "avg_margin_percent": float(row.avg_margin_percent),
+                "avg_velocity": float(row.avg_velocity)
+            })
+    except Exception:
+        db.rollback()
+        fallback_top_products_query = """
+            SELECT 
+                p.name as product_name,
+                p.sku,
+                COALESCE(p.category, 'Uncategorized') as category,
+                SUM(oi.unit_price * oi.quantity - oi.discount) as total_revenue,
+                SUM(oi.quantity) as total_units,
+                AVG(CASE WHEN oi.unit_price > 0 THEN ((oi.unit_price - p.cost) / oi.unit_price * 100) ELSE 0 END) as avg_margin_percent,
+                0 as avg_velocity
+            FROM orders o
+            JOIN order_items oi ON o.id = oi.order_id
+            JOIN products p ON oi.product_id = p.id
+            WHERE o.org_id = :org_id
+              AND o.ordered_at::date BETWEEN :start_date AND :end_date
+              AND o.status IN ('fulfilled', 'completed', 'shipped')
+            GROUP BY p.name, p.sku, COALESCE(p.category, 'Uncategorized')
+            ORDER BY total_revenue DESC
+            LIMIT 10
+        """
+        rows = db.execute(text(fallback_top_products_query), params).fetchall()
+        for row in rows:
+            top_performing_products.append({
+                "product_name": row.product_name,
+                "sku": row.sku,
+                "category": row.category or 'Uncategorized',
+                "total_revenue": float(row.total_revenue or 0),
+                "total_units": int(row.total_units or 0),
+                "avg_margin_percent": float(row.avg_margin_percent or 0),
+                "avg_velocity": 0.0
+            })
     
     # Trending analysis
     trending_analysis = {
