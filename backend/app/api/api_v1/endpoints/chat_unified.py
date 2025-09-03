@@ -251,6 +251,64 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
                     s2, e2 = s1 - timedelta(days=n), s1 - timedelta(days=1)
                     return (f"Last {n} days", s1, e1, f"Prior {n} days", s2, e2)
 
+                # 8) MTD vs prior MTD
+                if re.search(r"\b(mtd|month[-\s]?to[-\s]?date)\b", msg) and re.search(r"\b(prior|previous|last)\s+(mtd|month)\b", msg):
+                    first_this = end_date.replace(day=1)
+                    s1, e1 = first_this, end_date
+                    # prior month
+                    last_month_end = first_this - timedelta(days=1)
+                    s2 = last_month_end.replace(day=1)
+                    # same elapsed days
+                    elapsed = (e1 - s1).days
+                    e2_candidate = s2 + timedelta(days=elapsed)
+                    # cap to end of prior month
+                    _, last_day = __import__('calendar').monthrange(s2.year, s2.month)
+                    e2 = min(e2_candidate, datetime(s2.year, s2.month, last_day).date())
+                    return (f"MTD {end_date.strftime('%b %Y')}", s1, e1, f"Prior MTD {last_month_end.strftime('%b %Y')}", s2, e2)
+
+                # 9) QTD vs prior QTD or "this quarter vs last quarter"
+                if (re.search(r"\b(qtd|quarter[-\s]?to[-\s]?date)\b", msg) and re.search(r"\b(prior|previous|last)\s+qtd\b", msg)) or ("this quarter" in msg and ("last quarter" in msg or "previous quarter" in msg or "prior quarter" in msg)):
+                    # current quarter start
+                    q = (end_date.month - 1) // 3 + 1
+                    if q == 1:
+                        s1 = end_date.replace(month=1, day=1)
+                    elif q == 2:
+                        s1 = end_date.replace(month=4, day=1)
+                    elif q == 3:
+                        s1 = end_date.replace(month=7, day=1)
+                    else:
+                        s1 = end_date.replace(month=10, day=1)
+                    e1 = end_date
+                    # previous quarter start
+                    py, pq = (end_date.year - 1, 4) if q == 1 else (end_date.year, q - 1)
+                    if pq == 1:
+                        ps2 = datetime(py, 1, 1).date()
+                    elif pq == 2:
+                        ps2 = datetime(py, 4, 1).date()
+                    elif pq == 3:
+                        ps2 = datetime(py, 7, 1).date()
+                    else:
+                        ps2 = datetime(py, 10, 1).date()
+                    elapsed = (e1 - s1).days
+                    e2 = ps2 + timedelta(days=elapsed)
+                    # ensure not beyond prior quarter end
+                    pq_end = (datetime(py, 3, 31).date() if pq == 1 else datetime(py, 6, 30).date() if pq == 2 else datetime(py, 9, 30).date() if pq == 3 else datetime(py, 12, 31).date())
+                    if e2 > pq_end:
+                        e2 = pq_end
+                    return (f"QTD Q{q} {end_date.year}", s1, e1, f"Prior QTD Q{pq} {py}", ps2, e2)
+
+                # 10) YTD vs prior YTD
+                if re.search(r"\b(ytd|year[-\s]?to[-\s]?date)\b", msg) and re.search(r"\b(prior|previous|last)\s+(ytd|year)\b", msg):
+                    s1 = end_date.replace(month=1, day=1)
+                    e1 = end_date
+                    py = end_date.year - 1
+                    s2 = datetime(py, 1, 1).date()
+                    elapsed = (e1 - s1).days
+                    e2_candidate = s2 + timedelta(days=elapsed)
+                    # cap to 31 Dec previous year
+                    e2 = min(e2_candidate, datetime(py, 12, 31).date())
+                    return (f"YTD {end_date.year}", s1, e1, f"Prior YTD {py}", s2, e2)
+
                 return None
 
             # General compare handler (non-quarter, non-top-products, non-daily)
@@ -483,10 +541,7 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
 
             # Quarter summary or comparison intent
             if wants_quarter:
-                # Resolve year: explicit in text else current year
-                year_match = re.search(r"\b(20\d{2})\b", msg)
-                q_year = int(year_match.group(1)) if year_match else datetime.now().year
-
+                # Helper: quarter start/end
                 def quarter_range(y: int, q: int):
                     if q == 1:
                         return datetime(y, 1, 1).date(), datetime(y, 3, 31).date()
@@ -495,6 +550,11 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
                     if q == 3:
                         return datetime(y, 7, 1).date(), datetime(y, 9, 30).date()
                     return datetime(y, 10, 1).date(), datetime(y, 12, 31).date()
+
+                def prev_quarter(y: int, q: int) -> tuple[int, int]:
+                    if q == 1:
+                        return (y - 1, 4)
+                    return (y, q - 1)
 
                 def summary_for_range(s: date, e: date):
                     nonlocal tables
@@ -536,13 +596,22 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
                     aov = (tr / to) if to > 0 else 0.0
                     return tr, to, tu, aov
 
-                q_list = [int(q_matches[0])] if len(q_matches) == 1 else [int(q_matches[0]), int(q_matches[1])]
-                q_list = q_list[:2]
-                # If user implied comparison or provided two quarters, do compare
-                if wants_vs or len(q_list) == 2:
-                    qA, qB = (q_list + q_list)[0], (q_list + q_list)[1]  # ensure two values
-                    sA, eA = quarter_range(q_year, qA)
-                    sB, eB = quarter_range(q_year, qB)
+                # Parse up to two quarter tokens, each may include an explicit year (e.g., Q1 2024 vs Q1 2025)
+                q_tokens = list(re.finditer(r"\bq([1-4])\b(?:\s*(20\d{2}))?", msg))
+                # Fallback: original q_matches with a single global year context
+                year_match = re.search(r"\b(20\d{2})\b", msg)
+                default_year = int(year_match.group(1)) if year_match else datetime.now().year
+                if len(q_tokens) == 0 and len(q_matches) > 0:
+                    q_tokens = [re.search(r"\bq([1-4])\b", msg)] * len(q_matches)
+
+                # Determine comparison type
+                if wants_vs and len(q_tokens) >= 2:
+                    qA = int(q_tokens[0].group(1)) if q_tokens[0] else int(q_matches[0])
+                    yA = int(q_tokens[0].group(2)) if (q_tokens[0] and q_tokens[0].lastindex == 2 and q_tokens[0].group(2)) else default_year
+                    qB = int(q_tokens[1].group(1)) if q_tokens[1] else int(q_matches[1])
+                    yB = int(q_tokens[1].group(2)) if (q_tokens[1] and q_tokens[1].lastindex == 2 and q_tokens[1].group(2)) else default_year
+                    sA, eA = quarter_range(yA, qA)
+                    sB, eB = quarter_range(yB, qB)
                     trA, toA, tuA, aovA = summary_for_range(sA, eA)
                     trB, toB, tuB, aovB = summary_for_range(sB, eB)
 
@@ -553,11 +622,11 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
                     do = pct(toB, toA)
                     du = pct(tuB, tuA)
                     da = pct(aovB, aovA)
-                    header = f"Q{qA} {q_year} vs Q{qB} {q_year}"
+                    header = f"Q{qA} {yA} vs Q{qB} {yB}"
                     lines = [
-                        f"- Q{qA}: revenue ${trA:,.2f}, orders {toA}, units {tuA}, AOV ${aovA:,.2f}",
-                        f"- Q{qB}: revenue ${trB:,.2f}, orders {toB}, units {tuB}, AOV ${aovB:,.2f}",
-                        f"- Change (Q{qB} vs Q{qA}): revenue {dr:+.1f}%, orders {do:+.1f}%, units {du:+.1f}%, AOV {da:+.1f}%",
+                        f"- Q{qA} {yA}: revenue ${trA:,.2f}, orders {toA}, units {tuA}, AOV ${aovA:,.2f}",
+                        f"- Q{qB} {yB}: revenue ${trB:,.2f}, orders {toB}, units {tuB}, AOV ${aovB:,.2f}",
+                        f"- Change (Q{qB} {yB} vs Q{qA} {yA}): revenue {dr:+.1f}%, orders {do:+.1f}%, units {du:+.1f}%, AOV {da:+.1f}%",
                     ]
                     # Optional concise LLM narrative constrained to metrics
                     try:
@@ -567,8 +636,8 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
                         )
                         content = (
                             f"User question: {req.message}\n" 
-                            f"Metrics JSON: {{'Q{qA}': {{'revenue': {trA}, 'orders': {toA}, 'units': {tuA}, 'aov': {aovA}}},"
-                            f" 'Q{qB}': {{'revenue': {trB}, 'orders': {toB}, 'units': {tuB}, 'aov': {aovB}}},"
+                            f"Metrics JSON: {{'Q{qA} {yA}': {{'revenue': {trA}, 'orders': {toA}, 'units': {tuA}, 'aov': {aovA}}},"
+                            f" 'Q{qB} {yB}': {{'revenue': {trB}, 'orders': {toB}, 'units': {tuB}, 'aov': {aovB}}},"
                             f" 'delta_pct': {{'revenue': {dr}, 'orders': {do}, 'units': {du}, 'aov': {da}}}}}"
                         )
                         narrative = await lmstudio_client.get_chat_response([
@@ -580,15 +649,18 @@ async def unified_chat(req: UnifiedChatRequest, db: Session = Depends(get_db), c
                     answer = header + ("\n\n" + narrative.strip() if narrative else "") + "\n\n" + "\n".join(lines)
                     metrics = {
                         "comparison": {
-                            "lhs": {"label": f"Q{qA} {q_year}", "revenue": trA, "orders": toA, "units": tuA, "aov": aovA},
-                            "rhs": {"label": f"Q{qB} {q_year}", "revenue": trB, "orders": toB, "units": tuB, "aov": aovB},
+                "lhs": {"label": f"Q{qA} {yA}", "revenue": trA, "orders": toA, "units": tuA, "aov": aovA},
+                "rhs": {"label": f"Q{qB} {yB}", "revenue": trB, "orders": toB, "units": tuB, "aov": aovB},
                             "delta_pct": {"revenue": dr, "orders": do, "units": du, "aov": da}
                         }
                     }
                     return composer.compose_bi(answer, decision.confidence, metrics=metrics, tables=tables)
                 else:
                     # Single quarter summary
-                    qN = q_list[0]
+                    # Prefer explicit token with optional year; else fallback
+                    qN = int(q_matches[0])
+                    year_match = re.search(r"\b(20\d{2})\b", msg)
+                    q_year = int(year_match.group(1)) if year_match else datetime.now().year
                     sQ, eQ = quarter_range(q_year, qN)
                     trQ, toQ, tuQ, aovQ = summary_for_range(sQ, eQ)
                     period_label = f"Q{qN} {q_year}"
