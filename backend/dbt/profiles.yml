@@ -5,7 +5,7 @@ stockpilot:
       host: localhost
       user: stockpilot
       password: stockpilot_dev
-      port: 5432
+      port: 5433
       dbname: stockpilot
       schema: analytics
       threads: 4

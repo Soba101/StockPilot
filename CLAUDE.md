@@ -149,7 +149,31 @@ interface SettingsSection {
 
 ### Dual Chat Architecture
 - **Legacy**: `/api/v1/chat/query` - Intent rules → LLM fallback
-- **Hybrid**: `/api/v1/chat2/query` - Enhanced routing with feature flags
+- **Hybrid**: `/api/v1/chat2/query` - Enhanced routing with semantic embeddings + LLM tiebreaker
+
+### Hybrid Router Decision Flow
+The hybrid system uses a three-stage routing approach:
+1. **Deterministic Rules** - Keyword matching in `app/services/intent_rules.py`
+2. **Semantic Embeddings** - Vector similarity against BI exemplars in `app/core/exemplars/bi/`
+3. **LLM Tiebreaker** - OpenAI or local LLM for ambiguous cases
+
+```python
+# Hybrid router components in app/core/
+@dataclass
+class RouteDecision:
+    route: str              # RAG | OPEN | NO_ANSWER
+    intent: str | None      # Specific BI intent if detected
+    confidence: float       # 0.0-1.0 confidence score
+    reason: str            # Explanation of routing decision
+```
+
+### Feature Flags
+```env
+HYBRID_CHAT_ENABLED=1           # Enable hybrid routing
+HYBRID_ROUTER_RULES_ENABLED=1   # Enable deterministic rules
+HYBRID_ROUTER_RAG_ENABLED=1     # Enable semantic similarity  
+HYBRID_ROUTER_LLM_ENABLED=1     # Enable LLM tiebreaker
+```
 
 ### Intent Resolution
 ```python
@@ -165,7 +189,8 @@ Chat responses return JSON with tabular data and metadata:
   "response": "Here are your top margin products:",
   "data": [...],
   "confidence": "high",
-  "data_freshness": "real-time"
+  "data_freshness": "real-time",
+  "intent": "top_margin_products"
 }
 ```
 
@@ -210,12 +235,16 @@ Chat responses return JSON with tabular data and metadata:
 
 ### Backend Tests
 ```bash
-# Integration tests require running API server
-uvicorn app.main:app --reload &
-pytest tests/test_integration/
+# Quick tests with SQLite (recommended for development)
+DATABASE_URL=sqlite:///./test.db pytest -q
 
-# Unit tests with SQLite
-DATABASE_URL=sqlite:///./test.db pytest tests/test_unit/
+# Full integration test suite (requires running containers)
+docker-compose up -d
+pytest
+
+# Specific test categories
+pytest tests/test_api_integration.py  # Integration tests
+pytest tests/test_*_crud.py          # CRUD tests
 ```
 
 ### Frontend Tests
@@ -232,6 +261,9 @@ SECRET_KEY=your-jwt-secret-key
 REDIS_URL=redis://localhost:6379/0
 OPENAI_API_KEY=your-openai-api-key
 CHAT_ENABLED=1
+CHAT_LLM_FALLBACK_ENABLED=1
+HYBRID_CHAT_ENABLED=1
+ALERT_CRON_TOKEN=dev-cron-token
 ```
 
 ### Frontend Configuration
@@ -247,6 +279,8 @@ CHAT_ENABLED=1
 - Rename existing JSON response keys (only append new fields)
 - Leak foreign organization data
 - Use broad `except:` clauses without specific error handling
+- Call axios/fetch directly in React components (use hooks)
+- Update or delete past `inventory_movements` records
 
 ### Always Do
 - Filter all queries by `claims['org']`
@@ -254,6 +288,30 @@ CHAT_ENABLED=1
 - Maintain mart-first analytics pattern with fallbacks
 - Follow event sourcing for inventory changes
 - Use TypeScript interfaces for new components
+- Inherit from `BaseModel` for all database models
+- Use `GUID()` type for all ID fields
+- Make small, focused diffs with 3-5 lines of context
+
+## Database & Model Patterns
+
+### Model Inheritance Pattern
+All models inherit from `BaseModel` which provides:
+- UUID primary keys using `GUID()` type
+- Automatic `created_at` and `updated_at` timestamps
+- Cross-platform compatibility (Postgres/SQLite)
+
+```python
+class Product(Base, BaseModel):
+    __tablename__ = "products" 
+    org_id = Column(BaseModel.UUIDType, ForeignKey("organizations.id"), nullable=False)
+    sku = Column(String(100), nullable=False)
+    # id, created_at, updated_at inherited
+```
+
+### Testing Patterns
+- Use `TEST_ORG_ID` and `TEST_USER_ID` constants
+- Integration tests mint JWT tokens via `create_access_token()`
+- Skip tests if API server not running: `pytest.skip("API server is not running")`
 
 ## Recent Enhancements
 

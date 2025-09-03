@@ -32,6 +32,24 @@ CREATE TABLE locations (
 -- Ensure unique location names per org
 CREATE UNIQUE INDEX IF NOT EXISTS ux_locations_org_name ON locations(org_id, name);
 
+-- Suppliers table (must come before products due to foreign key reference)
+CREATE TABLE suppliers (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    contact_person VARCHAR(255),
+    email VARCHAR(255),
+    phone VARCHAR(50),
+    address TEXT,
+    lead_time_days INTEGER DEFAULT 7,
+    minimum_order_quantity INTEGER DEFAULT 1,
+    payment_terms VARCHAR(100),
+    is_active VARCHAR(10) DEFAULT 'true',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT chk_suppliers_is_active CHECK (is_active IN ('true', 'false'))
+);
+
 -- Products table
 CREATE TABLE products (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -44,22 +62,13 @@ CREATE TABLE products (
     price DECIMAL(10,2),
     uom VARCHAR(20) DEFAULT 'each',
     reorder_point INTEGER DEFAULT 0,
+    safety_stock_days INTEGER DEFAULT 3,
+    preferred_supplier_id UUID REFERENCES suppliers(id),
+    pack_size INTEGER DEFAULT 1,
+    max_stock_days INTEGER,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(org_id, sku)
-);
-
--- Suppliers table
-CREATE TABLE suppliers (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL,
-    contact_email VARCHAR(255),
-    contact_phone VARCHAR(50),
-    lead_time_days INTEGER DEFAULT 7,
-    minimum_order_quantity INTEGER DEFAULT 1,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Users table for auth
@@ -114,17 +123,24 @@ CREATE TABLE order_items (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Purchase order status enum
+DO $$ BEGIN
+    CREATE TYPE purchase_order_status AS ENUM ('draft', 'pending', 'ordered', 'received', 'cancelled');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
 -- Purchase orders table
 CREATE TABLE purchase_orders (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     supplier_id UUID NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
     po_number VARCHAR(50) NOT NULL UNIQUE,
-    status VARCHAR(20) DEFAULT 'draft',
+    status purchase_order_status DEFAULT 'draft',
     order_date TIMESTAMP WITH TIME ZONE,
     expected_date TIMESTAMP WITH TIME ZONE,
     received_date TIMESTAMP WITH TIME ZONE,
-    total_amount DECIMAL(10,2) DEFAULT 0.0,
+    total_amount FLOAT DEFAULT 0.0,
     notes TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -137,8 +153,8 @@ CREATE TABLE purchase_order_items (
     purchase_order_id UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
     product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     quantity INTEGER NOT NULL,
-    unit_cost DECIMAL(10,2) NOT NULL,
-    total_cost DECIMAL(10,2) NOT NULL,
+    unit_cost FLOAT NOT NULL,
+    total_cost FLOAT NOT NULL,
     received_quantity INTEGER DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -179,13 +195,13 @@ BEGIN
     (demo_org_id, 'GADGET-001', 'Super Gadget', 'Gadgets', 25.00, 75.00, 5);
     
     -- Insert sample suppliers
-    INSERT INTO suppliers (org_id, name, contact_email, contact_phone, lead_time_days, minimum_order_quantity) VALUES
-    (demo_org_id, 'Acme Supply Co', 'orders@acmesupply.com', '555-0123', 7, 10),
-    (demo_org_id, 'Gizmo Corp', 'purchasing@gizmocorp.com', '555-0456', 14, 5),
-    (demo_org_id, 'Widget Works', 'sales@widgetworks.com', '555-0789', 10, 25);
+    INSERT INTO suppliers (org_id, name, contact_person, email, phone, lead_time_days, minimum_order_quantity) VALUES
+    (demo_org_id, 'Acme Supply Co', 'John Smith', 'orders@acmesupply.com', '555-0123', 7, 10),
+    (demo_org_id, 'Gizmo Corp', 'Jane Doe', 'purchasing@gizmocorp.com', '555-0456', 14, 5),
+    (demo_org_id, 'Widget Works', 'Bob Johnson', 'sales@widgetworks.com', '555-0789', 10, 25);
     
     -- Insert demo admin user with properly hashed password
     -- Password: admin123 (hashed with bcrypt)
     INSERT INTO users (org_id, email, password_hash, role) VALUES
-    (demo_org_id, 'admin@demo.co', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj/RK.s5u.Ge', 'admin');
+    (demo_org_id, 'admin@demo.co', '$2b$12$AfzHESO676gWQM8.pLwcpuHjOJ1/R4QcJKleU28/2O5iEqoSUXNHe', 'admin');
 END $$;

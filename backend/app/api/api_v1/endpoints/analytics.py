@@ -382,9 +382,54 @@ def get_sales_analytics(
     
     base_query += " ORDER BY sales_date DESC, gross_revenue DESC"
     
-    # Execute query
-    result = db.execute(text(base_query), params)
-    daily_sales_raw = result.fetchall()
+    # Execute query with fallback pattern
+    daily_sales_raw = []
+    try:
+        # Try mart query first
+        result = db.execute(text(base_query), params)
+        daily_sales_raw = result.fetchall()
+        if not daily_sales_raw:
+            raise Exception("No mart data available")
+    except Exception:
+        # Fallback to raw tables
+        db.rollback()
+        fallback_query = """
+            SELECT 
+                o.ordered_at::date as sales_date,
+                COALESCE(o.channel, 'Unknown') as channel,
+                COALESCE(l.name, 'Unknown') as location_name,
+                p.name as product_name,
+                p.sku,
+                COALESCE(p.category, 'Uncategorized') as category,
+                oi.quantity as units_sold,
+                (oi.unit_price * oi.quantity - oi.discount) as gross_revenue,
+                ((oi.unit_price - p.cost) * oi.quantity) as gross_margin,
+                CASE 
+                    WHEN oi.unit_price > 0 THEN ((oi.unit_price - p.cost) / oi.unit_price * 100)
+                    ELSE 0 
+                END as margin_percent,
+                1 as orders_count,
+                0 as units_7day_avg,
+                0 as units_30day_avg
+            FROM orders o
+            JOIN order_items oi ON o.id = oi.order_id
+            JOIN products p ON oi.product_id = p.id
+            LEFT JOIN locations l ON o.location_id = l.id
+            WHERE o.org_id = :org_id
+              AND o.ordered_at::date BETWEEN :start_date AND :end_date
+              AND o.status IN ('fulfilled', 'completed', 'shipped')
+        """
+        
+        # Add the same filters for fallback
+        if channel:
+            fallback_query += " AND COALESCE(o.channel, 'Unknown') = :channel"
+        if product_category:
+            fallback_query += " AND COALESCE(p.category, 'Uncategorized') = :product_category"
+            
+        fallback_query += " ORDER BY o.ordered_at DESC, gross_revenue DESC"
+        
+        result = db.execute(text(fallback_query), params)
+        daily_sales_raw = result.fetchall()
     
     # Convert to Pydantic models
     daily_sales = []
