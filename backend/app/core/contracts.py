@@ -4,7 +4,7 @@ from jsonschema import Draft7Validator, ValidationError
 UNIFIED_RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
-        "route": {"type": "string", "enum": ["RAG", "OPEN", "NO_ANSWER"]},
+    "route": {"type": "string", "enum": ["RAG", "OPEN", "BI", "NO_ANSWER"]},
         "answer": {"type": "string"},
         "cards": {"type": "array", "items": {"type": "object"}},
         "provenance": {

@@ -125,6 +125,30 @@ class TestProductCRUDIntegration:
         assert updated_product["description"] == update_data["description"]
         assert updated_product["sku"] == unique_sku  # Should not change
 
+
+class TestChatUnifiedIntegration:
+    def test_chat2_open_basic(self, auth_headers):
+        """Minimal smoke test for /chat2/query OPEN path.
+        Skips gracefully if feature flag is off or server not running.
+        """
+        import os
+        # Ensure feature flag is on for this test context
+        if os.getenv("HYBRID_CHAT_ENABLED", "0") not in ("1", "true", "True"):  # pragma: no cover - skip path
+            pytest.skip("HYBRID_CHAT_ENABLED is off; skipping chat2 integration test")
+
+        payload = {"message": "hello there"}
+        r = requests.post(f"{API_BASE}/chat2/query", json=payload, headers=auth_headers, timeout=10)
+        assert r.status_code in (200, 503, 500)
+        if r.status_code == 200:
+            body = r.json()
+            # Expect unified contract fields (route, answer, provenance, confidence, follow_ups)
+            assert isinstance(body, dict)
+            assert body.get("route") in ("OPEN", "RAG", "NO_ANSWER")
+            assert "answer" in body
+            assert "provenance" in body
+            assert "confidence" in body
+            assert "follow_ups" in body
+
 class TestInventoryOperationsIntegration:
     """Integration tests for Inventory operations"""
     

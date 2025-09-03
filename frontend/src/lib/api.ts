@@ -150,51 +150,34 @@ export const inventoryApi = {
 // Chat API
 export const chatApi = {
   query: (payload: { prompt: string; intent?: string; params?: Record<string, any> }) =>
-    api.post('/chat2/query', { message: payload.prompt, intent: payload.intent, options: payload.params })
+    api
+      .post('/chat2/query', { message: payload.prompt, options: payload.params })
       .then(res => res.data)
-      .then(data => {
-        // Transform hybrid chat response to traditional chat format for compatibility
-        if (data.route) {
-          return {
-            intent: data.route === 'BI' ? 'analytics' : null,
-            title: getTitleFromRoute(data.route),
-            answer_summary: data.answer,
-            data: data.cards?.[0]?.data ? {
-              columns: Object.keys(data.cards[0].data[0] || {}).map(name => ({ name, type: 'string' })),
-              rows: data.cards[0].data
-            } : { columns: [], rows: [] },
-            query_explainer: {
-              definition: `${data.route} route with ${data.confidence} confidence`,
-              sql: null,
-              sources: []
-            },
-            freshness: {
-              generated_at: new Date().toISOString(),
-              data_fresh_at: data.provenance?.data?.refreshed_at || null,
-              max_lag_seconds: null
-            },
-            confidence: {
-              level: data.confidence > 0.75 ? 'high' : data.confidence > 0.55 ? 'medium' : 'low',
-              reasons: [data.reason || 'hybrid_routing']
-            },
-            source: 'hybrid',
-            warnings: []
-          };
-        }
-        return data; // Fallback for non-hybrid responses
+      .then((data: any) => {
+        // Transform unified backend schema to UI-friendly shape expected by chat page
+        const route: string = data?.route || 'OPEN';
+        const answer: string = data?.answer || '';
+  const confidenceNum: number = typeof data?.confidence === 'number' ? data.confidence : 0;
+  const confidenceLevel = (confidenceNum >= 0.6 ? 'high' : confidenceNum >= 0.3 ? 'medium' : 'low') as 'high' | 'medium' | 'low';
+  const source = (route === 'RAG' || route === 'BI' ? 'rules' : 'llm') as 'rules' | 'llm';
+        const followUps: string[] = Array.isArray(data?.follow_ups) ? data.follow_ups : [];
+
+  return {
+    title: getTitleFromRoute(route),
+          answer_summary: answer,
+          data: undefined, // No tabular data in chat for now
+          confidence: { level: confidenceLevel },
+          source,
+          query_explainer: {},
+          follow_ups: followUps,
+        };
       }),
 };
 
 // Helper function to get title from route
 function getTitleFromRoute(route: string): string {
-  const titles = {
-    'BI': 'Business Intelligence Analysis',
-    'RAG': 'Document Search Results', 
-    'MIXED': 'Combined Analysis & Documentation',
-    'OPEN': 'StockPilot Assistant',
-    'NO_ANSWER': 'Unable to Process Query'
-  };
-  return titles[route as keyof typeof titles] || 'StockPilot Response';
+  // Unify assistant persona across all routes
+  return 'StockPilot Assistant';
 }
 
 export const analyticsApi = {

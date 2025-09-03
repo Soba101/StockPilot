@@ -2,15 +2,14 @@
 
 ## Overview
 
-This document outlines the implementation plan for creating a unified chat system that intelligently routes queries to BI (database), RAG (in-process documents), MIXED (both), or OPEN chat modes using only LM Studio for all LLM operations.
+This document outlines the implementation plan for a unified chat system that routes queries to RAG (in-process documents) or OPEN chat modes using LM Studio for all LLM operations. BI/MIXED routing has been removed.
 
 ## Architecture
 
-```
+```text
 LM Studio (localhost:1234) → Unified Backend App
 ├─ Smart Router (rules + embeddings + LM Studio tiebreaker)
 ├─ Parameter Extractor (SGT time, SKU aliases, units)
-├─ BI Tool (existing SQL + enhanced provenance)
 ├─ RAG Tool (in-process: Chroma/pgvector + hybrid retrieval)
 └─ Answer Composer (unified JSON schema)
 ```
@@ -64,7 +63,7 @@ from jsonschema import Draft7Validator
 UNIFIED_RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
-        "route": {"type": "string", "enum": ["BI", "RAG", "MIXED", "OPEN", "NO_ANSWER"]},
+    "route": {"type": "string", "enum": ["RAG", "OPEN", "NO_ANSWER"]},
         "answer": {"type": "string"},
         "cards": {"type": "array", "items": {"type": "object"}},
         "provenance": {
@@ -99,17 +98,7 @@ UNIFIED_RESPONSE_SCHEMA = {
     "required": ["route", "answer", "provenance", "confidence", "follow_ups"]
 }
 
-BI_TOOL_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "intent": {"type": "string", "enum": ["top_skus_by_margin","stockout_risk","week_in_review","reorder_suggestions","slow_movers","product_detail","quarterly_forecast"]},
-        "time_start": {"type": "string", "format": "date-time"},
-        "time_end": {"type": "string", "format": "date-time"},
-        "skus": {"type": "array", "items": {"type": "string"}},
-        "options": {"type": "object"}
-    },
-    "required": ["intent", "time_start", "time_end"]
-}
+BI tooling removed.
 
 RAG_SEARCH_SCHEMA = {
     "type": "object",
@@ -123,6 +112,7 @@ RAG_SEARCH_SCHEMA = {
 ```
 
 **Functions**:
+
 - `validate_output(payload)` using jsonschema
 - Schema constants for all tool inputs/outputs
 
@@ -131,19 +121,22 @@ RAG_SEARCH_SCHEMA = {
 **Purpose**: Parse natural language into structured parameters with Singapore timezone.
 
 **Key Functions**:
+
 - `normalize_time(nl_text, tz="Asia/Singapore")` → (start_iso, end_iso)
 - `parse_numbers_units(nl_text)` → {"percent": 0.2, "qty": 300, ...}
 - `resolve_skus(nl_text)` → list[str]
 
 **Time Parsing Examples**:
+
 - "today" → SGT date range for current day
-- "last week" → SGT date range for previous 7 days  
+- "last week" → SGT date range for previous 7 days
 - "Q4" → date range for fiscal or calendar Q4 based on FISCAL_CALENDAR_START_MONTH
 - "this month" → SGT date range for current month
 
 **SKU Resolution**:
+
 - Uses `backend/app/core/glossary_map.json` for alias mapping
-- "iPhone" → ["APPL-IPH-001"] 
+- "iPhone" → ["APPL-IPH-001"]
 - "MacBook" → ["APPL-MBP-001", "APPL-MBA-001"]
 
 ### 4. Smart Hybrid Router (`backend/app/core/router.py`)
@@ -151,34 +144,30 @@ RAG_SEARCH_SCHEMA = {
 **Purpose**: Intelligently route queries using rules + embeddings + LLM tiebreaker.
 
 **Routing Logic**:
-1. **Rule Matching**: Score against 8 BI intent keywords
+
+1. **Rule Matching**: Score against document/open keywords
 2. **Embedding Similarity**: Compare against exemplar phrases
 3. **Combined Score**: 0.6 × rules + 0.4 × embeddings
 4. **Decision Thresholds**:
-   - ≥0.75: Direct route selection
-   - 0.55-0.75: LM Studio tiebreaker call
-   - <0.55: OPEN or NO_ANSWER
+    - ≥0.75: Direct route selection
+    - 0.55-0.75: LM Studio tiebreaker call
+    - <0.55: OPEN or NO_ANSWER
 
 **Exemplar Files** (`backend/app/core/exemplars/`):
-> Populate each file with **10–20 diverse phrasings** to ensure robust semantic routing.
-```
-bi/top_skus_by_margin.txt
-bi/stockout_risk.txt  
-bi/week_in_review.txt
-bi/reorder_suggestions.txt
-bi/slow_movers.txt
-bi/product_detail.txt
-bi/quarterly_forecast.txt
+
+> Populate each file with 10–20 diverse phrasings to ensure robust semantic routing.
+
+```text
 doc_qna.txt
 open_chat.txt
 ```
 
 **LM Studio Router Prompt**:
+
 ```
 You are a strict router. Output only valid JSON.
-Pick route: "BI" (database analytics), "RAG" (documents/policies), "MIXED" (both), or "OPEN".
-If BI, include one intent from: ["top_skus_by_margin", "stockout_risk", "week_in_review", "reorder_suggestions", "slow_movers", "product_detail", "quarterly_forecast"].
-Return {"route":"...","intent":null|"...","reason":"..."}.
+Pick route: "RAG" (documents/policies) or "OPEN".
+Return {"route":"...","intent":null,"reason":"..."}.
 ```
 
 ### 5. In-Process RAG System (`backend/app/tools/rag/`)
@@ -188,10 +177,12 @@ Return {"route":"...","intent":null|"...","reason":"..."}.
 #### 5.1. Vector Store (`backend/app/tools/rag/store.py`)
 
 **Store Options**:
+
 - **Chroma**: SQLite-based with `persist_directory` (set via `RAG_PERSIST_DIR`), simple setup
 - **pgvector**: PostgreSQL extension, reuses existing DB
 
 **Key Methods**:
+
 - `upsert(docs)` → store documents with metadata
 - `search(query, top_k, filters)` → retrieve candidates
 - `delete(doc_ids)` → remove documents
@@ -212,6 +203,7 @@ Return {"route":"...","intent":null|"...","reason":"..."}.
 #### 5.2. Document Ingestion (`backend/app/tools/rag/ingest.py`)
 
 **CLI Usage**:
+
 ```bash
 python -m backend.app.tools.rag.ingest \
     --path docs/ \
@@ -221,14 +213,16 @@ python -m backend.app.tools.rag.ingest \
 ```
 
 **Features**:
+
 - Supports .txt, .md, .pdf, .csv files (use PyMuPDF or pdfminer for robust text; store page numbers for `url#page` anchors)
 - 500-1000 token chunks with 100-150 overlap
 - Automatic metadata extraction from file paths
 - Batch processing with progress tracking
 
 **Document Types to Ingest**:
+
 - Returns/Exchanges policies
-- Markdown/Discount policies  
+- Markdown/Discount policies
 - Supplier SLAs
 - Standard Operating Procedures (SOPs)
 - Data Dictionary/Glossary
@@ -237,6 +231,7 @@ python -m backend.app.tools.rag.ingest \
 #### 5.3. Hybrid Retriever (`backend/app/tools/rag/retriever.py`)
 
 **Retrieval Strategy**:
+
 - **RBAC/Filters**: apply `department`, `owner`, and user/role filters at search time to restrict snippets.
 1. **Keyword Search**: BM25 or PostgreSQL `pg_trgm` LIKE matching
 2. **Vector Search**: Cosine similarity using LM Studio embeddings
@@ -254,54 +249,22 @@ python -m backend.app.tools.rag.ingest \
 }]
 ```
 
-### 6. Enhanced BI Tool (`backend/app/tools/bi_tool.py`)
+### 6. BI tooling
 
-**Purpose**: Execute parameterized SQL queries with rich provenance.
-
-**Key Features**:
-- Parameterized SQL templates for all 8 intents
-- Row-level security/RBAC filters applied via `actor_id`/tenant in WHERE clauses
-- Freshness checking against analytics marts
-- Automatic fallback to transactional tables if stale
-- Rich provenance metadata
-
-**Return Format**:
-```python
-{
-    "data": [...],                    # Query results
-    "insights": [...],                # Business insights
-    "provenance": {
-        "tables": ["analytics_marts.sales_daily"],
-        "query_id": "q_abc123",
-        "refreshed_at": "2025-08-13T10:05:00+08:00"
-    },
-    "banner": "Fell back to transactional on stale mart"  # if applicable
-}
-```
-
-**Supported Intents**:
-1. `top_skus_by_margin`
-2. `stockout_risk` 
-3. `week_in_review`
-4. `reorder_suggestions`
-5. `slow_movers`
-6. `product_detail`
-7. `quarterly_forecast`
+Removed.
 
 ### 7. Unified Answer Composer (`backend/app/core/composer.py`)
 
 **Purpose**: Transform tool outputs into consistent response format.
 
 **Composition Methods**:
-- `compose_bi(result)` → BI response with cards + provenance
 - `compose_rag(snippets)` → RAG response with citations (≥1 required)
-- `compose_mixed(bi_result, rag_snippets)` → Coherent blend of both
 - `compose_open(llm_response)` → Open chat with guardrails
 - `compose_no_answer(reason, follow_ups)` → Helpful fallback
 
 **Guardrails**:
-- BI responses: Must include provenance or return NO_ANSWER
-- RAG responses: Must include ≥1 citation or return NO_ANSWER  
+
+- RAG responses: Must include ≥1 citation or return NO_ANSWER
 - No fabricated numbers without SQL backing
 - All responses validate against unified schema
 
@@ -313,9 +276,7 @@ python -m backend.app.tools.rag.ingest \
 1. **Route Decision**: `router.route(user_text)` → {route, intent, confidence}
 2. **Parameter Extraction**: Extract time ranges, SKUs, units in SGT
 3. **Tool Execution**:
-   - **BI**: `bi_tool.run(intent, time_start, time_end, skus, options)`
    - **RAG**: `rag.retriever.search(question, top_k, filters)`
-   - **MIXED**: Execute both tools (parallel if possible)
    - **OPEN**: LM Studio chat with fact-checking via tools
 4. **Response Composition**: Transform to unified JSON format
 5. **Validation**: Ensure response passes schema validation
@@ -327,15 +288,12 @@ python -m backend.app.tools.rag.ingest \
 
 ## Example Query Flows
 
-### 1. Pure BI Query
+### 1. Open Chat Query
 **Input**: "what is today's best selling item?"
 
 **Flow**:
-1. Router: Rules match "best selling" → BI/top_skus_by_margin (score: 0.95)
-2. Params: "today" → SGT date range for current day
-3. BI Tool: Execute top_skus_by_margin SQL with today's date filter
-4. Composer: Build response with data table + provenance
-5. Output: Cards with top products, query metadata, high confidence
+1. Router: OPEN
+2. Composer: Build response with assistant answer
 
 ### 2. Pure RAG Query  
 **Input**: "what is our returns policy for markdowns?"
@@ -348,15 +306,8 @@ python -m backend.app.tools.rag.ingest \
 5. Output: Policy text with document reference, medium confidence
 
 ### 3. Mixed Query
-**Input**: "forecast Q4 margin if I markdown slow movers by 20% and confirm the policy"
 
-**Flow**:
-1. Router: Complex query → MIXED route via LM Studio tiebreaker
-2. Params: "Q4" → SGT Q4 date range, "20%" → {"percent": 0.2}
-3. BI Tool: Execute quarterly_forecast + slow_movers SQL
-4. RAG Tool: Search for markdown policies  
-5. Composer: Merge SQL forecast with policy constraints
-6. Output: Financial projection + policy compliance, structured format
+Removed.
 
 ## Testing Strategy
 
@@ -374,11 +325,7 @@ python -m backend.app.tools.rag.ingest \
 - SKU alias resolution
 - Number/unit extraction
 
-**test_bi_tool.py**:
-- SQL template rendering
-- Provenance metadata
-- Freshness checking
-- Fallback mechanisms
+Remove BI tool tests.
 
 **test_rag_tool.py**:
 - Document indexing
@@ -395,9 +342,8 @@ python -m backend.app.tools.rag.ingest \
 ### Integration Tests
 
 **End-to-End Scenarios**:
-- Pure BI queries with various intents
+
 - Pure RAG queries with different document types
-- Mixed queries requiring both systems
 - Error handling and fallback behaviors
 
 **Mock Strategy**:
@@ -422,9 +368,8 @@ python -m backend.app.tools.rag.ingest \
 ### Monitoring & Observability
 
 ### Caching & Performance
-- BI result cache keyed by (intent, params, snapshot) with TTL.
+
 - Semantic cache for recent natural-language prompts.
-- Parallelize BI and RAG in MIXED route.
 - Consider a smaller instruct model if latency exceeds target; keep embeddings stable.
 - Health check endpoint for LM Studio connectivity
 - Request/response logging for debugging
@@ -434,11 +379,10 @@ python -m backend.app.tools.rag.ingest \
 ## Success Criteria
 
 ### Functional Requirements
-- ✅ `/chat` endpoint returns unified JSON for all route types
+
+- ✅ `/chat` endpoint returns unified JSON for RAG/OPEN/NO_ANSWER
 - ✅ LM Studio is the only LLM provider (no OpenAI dependencies)
-- ✅ BI responses include query provenance and freshness metadata
 - ✅ RAG responses include document citations with quotes
-- ✅ Mixed queries execute both systems and merge coherently
 - ✅ Singapore timezone handling for all time references
 - ✅ NO_ANSWER path with helpful follow-up suggestions
 
@@ -451,20 +395,10 @@ python -m backend.app.tools.rag.ingest \
 
 ### Example Validations
 ```bash
-# Test BI route
-curl -s localhost:8000/chat -H "Content-Type: application/json" \
-  -d '{"message":"what is today's best selling item?"}' | jq '.route'
-# Expected: "BI"
-
 # Test RAG route  
 curl -s localhost:8000/chat -H "Content-Type: application/json" \
   -d '{"message":"what is our returns policy for markdowns?"}' | jq '.route'
 # Expected: "RAG"
-
-# Test MIXED route
-curl -s localhost:8000/chat -H "Content-Type: application/json" \
-  -d '{"message":"forecast Q4 margin if I markdown slow movers by 20% and confirm policy"}' | jq '.route'
-# Expected: "MIXED"
 ```
 
 ## Implementation Timeline

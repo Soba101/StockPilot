@@ -3,7 +3,6 @@ Enhanced version with semantic similarity scoring.
 """
 from __future__ import annotations
 from typing import Dict, Any, List, Optional
-from app.services.intent_rules import INTENT_KEYWORDS, BUSINESS_QUERY_INDICATORS
 from app.core.config import settings
 from app.core.llm_lmstudio import lmstudio_client
 from dataclasses import dataclass
@@ -20,6 +19,34 @@ class RouteDecision:
     reason: str
 
 DOC_KEYWORDS = ["policy", "return", "returns", "markdown", "sop", "procedure", "guide", "documentation", "manual", "rule", "rules", "process"]
+# Broader BI vocabulary including synonyms and common business phrases
+BI_KEYWORDS = [
+    # Core sales metrics
+    "sales", "revenue", "gmv", "turnover", "units", "orders", "transactions",
+    "aov", "average order value", "asp", "average selling price", "basket size",
+    # Profitability
+    "profit", "net income", "gross profit", "gross margin", "margin", "margin %", "margin percent",
+    # Trends / deltas
+    "trend", "growth", "decline", "increase", "decrease", "change", "delta", "compare", "comparison", "versus", "vs",
+    "yoy", "year over year", "mom", "month over month", "qoq", "quarter over quarter",
+    # Groupings / dimensions
+    "channel", "sales channel", "marketplace", "shopify", "amazon", "shopee", "lazada", "tiktok",
+    "category", "brand", "sku", "product", "top products", "best sellers", "top sellers", "winners",
+    # Operational metrics
+    "conversion", "refunds", "returns", "discount", "markdown", "promotion",
+]
+BI_STRONG_TRIGGERS = [
+    "sales", "revenue", "orders", "units", "aov", "gross margin", "gmv", "profit"
+]
+BI_PERIOD_TRIGGERS = [
+    # Relative periods
+    "today", "yesterday", "this week", "last week", "this month", "last month", "this quarter", "last quarter", "this year", "last year",
+    "previous year", "ytd", "year to date", "mtd", "month to date", "qtd", "quarter to date",
+    # Rolling windows
+    "last 7", "last 14", "last 30", "last 60", "last 90",
+    # Quarter markers and compare words
+    "quarter", "q1", "q2", "q3", "q4", "qoq", "mom", "yoy", "vs", "versus"
+]
 
 OPEN_FALLBACK_THRESHOLD = 0.1
 
@@ -170,12 +197,17 @@ async def _llm_tiebreaker(prompt: str, scores: Dict[str, float]) -> RouteDecisio
         return RouteDecision(route="OPEN", intent=None, confidence=0.3, reason="llm_error")
 
 
-# Removed BI-related functions: _is_business_query, _best_bi_intent
+# BI routing removed; only RAG vs OPEN
 
 async def route(prompt: str) -> RouteDecision:
     """Route to either RAG (documents) or OPEN (general assistant)."""
+    pl = prompt.lower()
+    # Fast-path: strong BI trigger words or period triggers
+    if any(t in pl for t in BI_STRONG_TRIGGERS) or any(p in pl for p in BI_PERIOD_TRIGGERS):
+        return RouteDecision(route="BI", intent=None, confidence=0.75, reason="strong_bi_trigger")
     # Rule-based scoring for documents
     doc_score = _rule_score(prompt, DOC_KEYWORDS)
+    bi_score = _rule_score(prompt, BI_KEYWORDS)
     
     # Embedding-based scoring (if enabled)
     embedding_scores = await _compute_embedding_scores(prompt)
@@ -184,11 +216,14 @@ async def route(prompt: str) -> RouteDecision:
     rule_doc_score = doc_score
     embedding_doc_score = embedding_scores.get("doc_qna", 0.0)
     rag_confidence = 0.6 * rule_doc_score + 0.4 * embedding_doc_score
+    bi_confidence = 0.8 * bi_score  # emphasize BI when keywords appear
     
     open_embedding = embedding_scores.get("open_chat", 0.0)
     open_confidence = 0.4 * open_embedding
     
     # Decision logic: prefer RAG if document keywords are detected
+    if bi_confidence >= 0.15:
+        return RouteDecision(route="BI", intent=None, confidence=bi_confidence, reason="rule_bi")
     if rag_confidence >= 0.25:
         return RouteDecision(route="RAG", intent=None, confidence=rag_confidence, reason="high_conf_rag")
     elif open_confidence >= 0.2:

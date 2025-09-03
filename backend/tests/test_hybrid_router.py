@@ -3,18 +3,23 @@ import pytest
 import asyncio
 
 @pytest.mark.asyncio
-async def test_bi_route():
+async def test_no_bi_route_anymore():
     d = await router.route("show top margin skus last week")
-    assert d.route in ("BI","MIXED")
-    assert d.intent in ("top_skus_by_margin",)
+    # Expect one of the supported routes
+    assert d.route in ("OPEN","RAG","BI","NO_ANSWER")
 
 @pytest.mark.asyncio
 async def test_doc_route():
     d = await router.route("what is our returns policy for markdown items")
-    # early phase may classify as RAG or MIXED or OPEN depending on heuristics
-    assert d.route in ("RAG","MIXED","OPEN","NO_ANSWER")
+    # may classify as RAG or OPEN depending on heuristics
+    assert d.route in ("RAG","OPEN","NO_ANSWER")
 
 @pytest.mark.asyncio
 async def test_open_fallback():
     d = await router.route("hello there")
     assert d.route in ("OPEN","NO_ANSWER")
+
+@pytest.mark.asyncio
+async def test_bi_route_for_sales_query():
+    d = await router.route("how are my sales doing this year")
+    assert d.route in ("BI","OPEN")

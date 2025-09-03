@@ -92,19 +92,7 @@ INTENT_KEYWORDS = {
     ]
 }
 
-# Add comprehensive catch-all business terms that should trigger BI analysis
-BUSINESS_QUERY_INDICATORS = [
-    # Generic business questions
-    'sales', 'revenue', 'profit', 'income', 'earnings', 'money', 'financial',
-    'business', 'performance', 'results', 'numbers', 'data', 'analytics',
-    'metrics', 'kpi', 'dashboard', 'report', 'reporting', 'insights',
-    # Inventory/stock
-    'inventory', 'stock', 'products', 'items', 'skus', 'catalog', 'warehouse',
-    'distribution', 'logistics', 'supply', 'demand', 'turnover', 'velocity',
-    # Operations
-    'operations', 'operational', 'efficiency', 'productivity', 'utilization',
-    'optimization', 'trends', 'patterns', 'analysis', 'statistics', 'stats'
-]
+# BI business indicator keywords removed; BI routing no longer used in chat
 
 # Mapping needed by chat endpoint to validate params
 INTENT_PARAM_MODELS = {

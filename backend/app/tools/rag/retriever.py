@@ -63,6 +63,10 @@ class RAGRetriever:
         """Search for relevant document snippets."""
         await self._ensure_initialized()
         
+        # Ensure dependencies are initialized (satisfy type checker and runtime)
+        if self.embedder is None or self.collection is None:
+            raise RuntimeError("RAG retriever not initialized correctly")
+
         if not question.strip():
             return []
         
@@ -73,10 +77,18 @@ class RAGRetriever:
             q_emb = self.embedder.encode([question], normalize_embeddings=True)[0]
             
             # Search in existing collection
+            # Apply org filter at vector search level if present in filters
+            where: Optional[Dict[str, Any]] = None
+            if filters:
+                org_val = filters.get("org_id")
+                if org_val is not None:
+                    where = {"org_id": org_val}
+
             results = self.collection.query(
                 query_embeddings=[q_emb.tolist()], 
                 n_results=k,
-                include=["documents", "metadatas", "distances"]
+                include=["documents", "metadatas", "distances"],
+                where=where
             )
             
             # Format results for hybrid chat system
@@ -192,6 +204,9 @@ class RAGRetriever:
         try:
             await self._ensure_initialized()
             
+            if self.collection is None or self.embedder is None:
+                raise RuntimeError("RAG retriever not initialized correctly")
+
             # Check collection status
             count = self.collection.count()
             
